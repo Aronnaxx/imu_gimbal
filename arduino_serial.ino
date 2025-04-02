@@ -19,6 +19,10 @@ int servo3_target = 90;
 // Movement speed (degrees per update)
 float movement_speed = 2.0;
 
+// Movement state
+bool random_mode_active = false;
+bool movement_active = false;
+
 void setup() {
   Serial.begin(115200);
   Wire.begin();
@@ -72,6 +76,11 @@ void setNewRandomTargets() {
 }
 
 void updateServos() {
+  // Only update if movement is active
+  if (!movement_active) {
+    return;
+  }
+  
   // Smoothly interpolate between current position and target
   bool servo1_done = moveServoTowardTarget(&servo1_pos, servo1_target);
   bool servo2_done = moveServoTowardTarget(&servo2_pos, servo2_target);  
@@ -83,7 +92,7 @@ void updateServos() {
   servo3.write(servo3_pos);
   
   // If all servos have reached targets and we're in random mode, set new targets
-  if (servo1_done && servo2_done && servo3_done && Serial.available() <= 0) {
+  if (servo1_done && servo2_done && servo3_done && random_mode_active) {
     setNewRandomTargets();
   }
 }
@@ -107,10 +116,16 @@ void processCommand(String command) {
   command.trim(); // Remove any whitespace or newlines
   
   if (command.startsWith("RANDOM")) {
-    // Set new random targets
-    setNewRandomTargets();
+    // Enable random mode but don't start movement yet
+    random_mode_active = true;
+    movement_active = false;
+    Serial.println("Random mode enabled. Use START to begin movement.");
   }
   else if (command.startsWith("CONTROL")) {
+    // Switch to control mode
+    random_mode_active = false;
+    movement_active = true;
+    
     // Parse the command format: CONTROL,servo1,servo2,servo3
     int firstComma = command.indexOf(',');
     int secondComma = command.indexOf(',', firstComma + 1);
@@ -134,6 +149,19 @@ void processCommand(String command) {
       Serial.println(servo3_target);
     }
   }
+  else if (command.startsWith("START")) {
+    // Start movement based on current mode
+    if (random_mode_active) {
+      setNewRandomTargets(); // Set initial random targets
+    }
+    movement_active = true;
+    Serial.println("Movement started");
+  }
+  else if (command.startsWith("STOP")) {
+    // Stop movement
+    movement_active = false;
+    Serial.println("Movement stopped");
+  }
   else if (command.startsWith("SPEED")) {
     // Allow adjusting the movement speed
     int comma = command.indexOf(',');
@@ -145,6 +173,13 @@ void processCommand(String command) {
         Serial.println(movement_speed);
       }
     }
+  }
+  else if (command.startsWith("ZERO")) {
+    // Zero out the IMU calibration
+    bno.setExtCrystalUse(false);
+    delay(10);
+    bno.setExtCrystalUse(true);
+    Serial.println("IMU reset requested");
   }
 }
 
