@@ -9,14 +9,30 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import threading
 import time
 import numpy as np
+import serial.tools.list_ports
 
-# Set your Arduino's COM port (e.g., 'COM3' on Windows or '/dev/ttyUSB0' on Linux)
-PORT = '/dev/tty.usbmodem101'
+# Find Arduino port automatically
+def find_arduino_port():
+    ports = list(serial.tools.list_ports.comports())
+    for port in ports:
+        if 'Arduino' in port.description or 'usbmodem' in port.device:
+            return port.device
+    return None
+
+# Try to find Arduino port automatically, otherwise use default
+PORT = find_arduino_port() or '/dev/tty.usbmodem101'
 BAUD = 115200
 
 # Initialize serial connection
-ser = serial.Serial(PORT, BAUD, timeout=1)
-print(f"Connected to {PORT} at {BAUD} baud")
+try:
+    ser = serial.Serial(PORT, BAUD, timeout=1)
+    print(f"Connected to {PORT} at {BAUD} baud")
+except serial.SerialException as e:
+    print(f"Error connecting to serial port: {e}")
+    print("Available ports:")
+    for port in serial.tools.list_ports.comports():
+        print(f" - {port.device}: {port.description}")
+    raise
 
 # Lists to hold Euler angle data: x (yaw), y (pitch), z (roll)
 x_data, y_data, z_data = [], [], []
@@ -102,6 +118,9 @@ def start_movement():
     ser.flush()
     print("Movement started")
     movement_status_var.set("Status: Running")
+    
+    # Apply current settings when starting
+    send_control_command()
 
 def stop_movement():
     global is_movement_active
@@ -131,17 +150,38 @@ servo3_var = tk.IntVar(value=servo3_pos)
 def increment_servo(servo_var, amount):
     current = servo_var.get()
     servo_var.set(min(180, current + amount))
+    # Auto-apply settings when in control mode
+    if mode_var.get() == "CONTROL" and is_movement_active:
+        root.after(10, send_control_command)
 
 def decrement_servo(servo_var, amount):
     current = servo_var.get()
     servo_var.set(max(0, current - amount))
+    # Auto-apply settings when in control mode
+    if mode_var.get() == "CONTROL" and is_movement_active:
+        root.after(10, send_control_command)
 
 def center_servo(servo_var):
     servo_var.set(90)
+    # Auto-apply settings when in control mode
+    if mode_var.get() == "CONTROL" and is_movement_active:
+        root.after(10, send_control_command)
 
 # Servo 1 controls
 ttk.Label(servo_frame, text="Servo 1 (Yaw):").grid(column=0, row=0, sticky=tk.W)
-ttk.Scale(servo_frame, from_=0, to=180, variable=servo1_var, orient=tk.HORIZONTAL).grid(column=1, row=0, sticky=(tk.W, tk.E))
+
+# Add event handlers for sliders
+def on_slider_change(event):
+    # Auto-apply settings when in control mode
+    if mode_var.get() == "CONTROL" and is_movement_active:
+        root.after(10, send_control_command)
+
+# Create and bind servo sliders
+servo1_slider = ttk.Scale(servo_frame, from_=0, to=180, variable=servo1_var, orient=tk.HORIZONTAL)
+servo1_slider.grid(column=1, row=0, sticky=(tk.W, tk.E))
+servo1_slider.bind("<B1-Motion>", on_slider_change)
+servo1_slider.bind("<ButtonRelease-1>", on_slider_change)
+
 ttk.Label(servo_frame, textvariable=servo1_var).grid(column=2, row=0)
 
 servo1_btn_frame = ttk.Frame(servo_frame)
@@ -159,7 +199,10 @@ ttk.Button(servo1_btn_frame, text="+10", width=3,
 
 # Servo 2 controls
 ttk.Label(servo_frame, text="Servo 2 (Pitch):").grid(column=0, row=1, sticky=tk.W)
-ttk.Scale(servo_frame, from_=0, to=180, variable=servo2_var, orient=tk.HORIZONTAL).grid(column=1, row=1, sticky=(tk.W, tk.E))
+servo2_slider = ttk.Scale(servo_frame, from_=0, to=180, variable=servo2_var, orient=tk.HORIZONTAL)
+servo2_slider.grid(column=1, row=1, sticky=(tk.W, tk.E))
+servo2_slider.bind("<B1-Motion>", on_slider_change)
+servo2_slider.bind("<ButtonRelease-1>", on_slider_change)
 ttk.Label(servo_frame, textvariable=servo2_var).grid(column=2, row=1)
 
 servo2_btn_frame = ttk.Frame(servo_frame)
@@ -177,7 +220,10 @@ ttk.Button(servo2_btn_frame, text="+10", width=3,
 
 # Servo 3 controls
 ttk.Label(servo_frame, text="Servo 3 (Roll):").grid(column=0, row=2, sticky=tk.W)
-ttk.Scale(servo_frame, from_=0, to=180, variable=servo3_var, orient=tk.HORIZONTAL).grid(column=1, row=2, sticky=(tk.W, tk.E))
+servo3_slider = ttk.Scale(servo_frame, from_=0, to=180, variable=servo3_var, orient=tk.HORIZONTAL)
+servo3_slider.grid(column=1, row=2, sticky=(tk.W, tk.E))
+servo3_slider.bind("<B1-Motion>", on_slider_change)
+servo3_slider.bind("<ButtonRelease-1>", on_slider_change)
 ttk.Label(servo_frame, textvariable=servo3_var).grid(column=2, row=2)
 
 servo3_btn_frame = ttk.Frame(servo_frame)
@@ -299,51 +345,69 @@ ttk.Button(control_panel, text="Apply Settings", command=send_control_command).p
 def update_plot():
     global x_data, y_data, z_data
     
-    # Read a line from the serial port
-    if ser.in_waiting > 0:
-        line_raw = ser.readline().decode('utf-8').strip()
-        match = euler_regex.match(line_raw)
-        
-        if match:
-            yaw = float(match.group(1))
-            pitch = float(match.group(2))
-            roll = float(match.group(3))
+    # Read all available data from the serial port
+    while ser.in_waiting > 0:
+        try:
+            line_raw = ser.readline().decode('utf-8', errors='replace').strip()
             
-            x_data.append(yaw)
-            y_data.append(pitch)
-            z_data.append(roll)
+            match = euler_regex.match(line_raw)
             
-            # Update status display
-            current_angles_text.set(f"Yaw: {yaw:.1f}, Pitch: {pitch:.1f}, Roll: {roll:.1f}")
-            
-            # Limit history to last 200 points for clarity
-            if len(x_data) > 200:
-                x_data[:] = x_data[-200:]
-                y_data[:] = y_data[-200:]
-                z_data[:] = z_data[-200:]
-            
-            # Update the plotted line and the current position dot
-            if len(x_data) > 0:
-                line.set_data(x_data, y_data)
-                line.set_3d_properties(z_data)
-                dot.set_data(x_data[-1:], y_data[-1:])
-                dot.set_3d_properties(z_data[-1:])
+            if match:
+                yaw = float(match.group(1))
+                pitch = float(match.group(2))
+                roll = float(match.group(3))
                 
-                # Update plot limits if auto-resize is enabled
-                if len(x_data) > 1 and len(x_data) % 10 == 0:  # Only check every 10 points
-                    update_plot_limits()
+                x_data.append(yaw)
+                y_data.append(pitch)
+                z_data.append(roll)
                 
-                canvas.draw_idle()
-        else:
-            # Print non-matching lines for debugging
-            if line_raw and not line_raw.startswith("Euler:"):
-                print(f"Received: {line_raw}")
+                # Update status display
+                current_angles_text.set(f"Yaw: {yaw:.1f}, Pitch: {pitch:.1f}, Roll: {roll:.1f}")
+                
+                # Limit history to last 200 points for clarity
+                if len(x_data) > 200:
+                    x_data[:] = x_data[-200:]
+                    y_data[:] = y_data[-200:]
+                    z_data[:] = z_data[-200:]
+                
+                # Update the plotted line and the current position dot
+                if len(x_data) > 0:
+                    line.set_data(x_data, y_data)
+                    line.set_3d_properties(z_data)
+                    dot.set_data(x_data[-1:], y_data[-1:])
+                    dot.set_3d_properties(z_data[-1:])
+                    
+                    # Update plot limits if auto-resize is enabled
+                    if len(x_data) > 1 and len(x_data) % 10 == 0:  # Only check every 10 points
+                        update_plot_limits()
+                    
+                    canvas.draw_idle()
+            else:
+                # Print non-matching lines for debugging
+                if line_raw and not line_raw.startswith("Euler:"):
+                    print(f"Received: {line_raw}")
+        except Exception as e:
+            # Handle serial read errors
+            print(f"Serial read error: {e}")
+            # Try to flush the input buffer if there's an issue
+            if ser.in_waiting > 100:  # If buffer is filling up with bad data
+                ser.reset_input_buffer()
+                print("Reset input buffer due to overflow")
     
-    # Schedule the next update
-    root.after(50, update_plot)
+    # Schedule the next update with a shorter interval for more frequent updates
+    root.after(10, update_plot)
 
-# Start the update process
-root.after(100, update_plot)
+# Set up a periodic task to send control commands when in control mode
+def periodic_command_update():
+    if is_movement_active and mode_var.get() == "CONTROL":
+        send_control_command()
+    root.after(100, periodic_command_update)  # Update every 100ms
+
+# Start the periodic update
+root.after(100, periodic_command_update)
+
+# Start the update process with a shorter interval
+root.after(10, update_plot)
 
 # Send initial command to set up Arduino
 send_control_command()
