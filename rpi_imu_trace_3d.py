@@ -34,8 +34,7 @@ DANGER_COLOR = "#e74c3c"
 # Set up I2C and devices
 try:
     # Initialize I2C bus
-    i2c = busio.I2C(board.SCL, board.SDA)
-    # Initialize BNO055 IMU sensor
+    i2c = board.I2C()    # Initialize BNO055 IMU sensor
     sensor = adafruit_bno055.BNO055_I2C(i2c)
     # Initialize PCA9685 servo controller with ServoKit
     pca = ServoKit(channels=16)
