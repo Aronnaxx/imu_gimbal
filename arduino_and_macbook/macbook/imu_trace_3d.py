@@ -13,6 +13,7 @@ import serial.tools.list_ports
 from PIL import Image, ImageTk, ImageDraw  # For custom widget rendering
 import math
 import colorsys
+from matplotlib.figure import Figure
 
 # Custom theme and style constants
 DARK_BG = "#2E2E2E"
@@ -74,12 +75,29 @@ class CircularGauge(tk.Canvas):
         self.min_val = min_val
         self.max_val = max_val
         self.label = label
+        self.min_size = 80  # Minimum size to prevent too small gauges
         
         # Bind to variable changes
         self.variable.trace_add('write', self.update_gauge)
         
+        # Bind to resize events
+        self.bind("<Configure>", self.on_resize)
+        
         # Draw initial state
         self.update_gauge()
+    
+    def on_resize(self, event):
+        """Handle resize events by updating the gauge size"""
+        # Get the smaller of width or height to maintain aspect ratio
+        new_size = min(event.width, event.height)
+        
+        # Don't go below min_size
+        if new_size < self.min_size:
+            new_size = self.min_size
+            
+        if new_size != self.size:
+            self.size = new_size
+            self.update_gauge()
         
     def update_gauge(self, *args):
         """Update the gauge to reflect the current variable value"""
@@ -88,9 +106,12 @@ class CircularGauge(tk.Canvas):
         # Calculate parameters
         value = self.variable.get()
         angle = 225 - (value - self.min_val) / (self.max_val - self.min_val) * 270
-        center_x = self.size / 2
-        center_y = self.size / 2
-        radius = self.size * 0.4
+        center_x = self.winfo_width() / 2
+        center_y = self.winfo_height() / 2
+        radius = min(center_x, center_y) * 0.8
+        
+        if radius <= 0:  # Protection against initial sizing issues
+            return
         
         # Draw background circle
         self.create_oval(center_x - radius - 5, center_y - radius - 5,
@@ -193,9 +214,15 @@ except serial.SerialException as e:
 
 # Lists to hold Euler angle data: x (yaw), y (pitch), z (roll)
 x_data, y_data, z_data = [], [], []
+ghost_x_data, ghost_y_data, ghost_z_data = [], [], []
+
+# Data for second IMU (if connected)
+second_imu_data = {"connected": False, "yaw": 0, "pitch": 0, "roll": 0}
 
 # Regular expression to parse serial data of the form: "Euler: 45.0, -30.0, 10.0"
 euler_regex = re.compile(r"Euler:\s*([\d\.-]+),\s*([\d\.-]+),\s*([\d\.-]+)")
+# New regex for second IMU data (if implemented)
+imu2_regex = re.compile(r"IMU2:\s*([\d\.-]+),\s*([\d\.-]+),\s*([\d\.-]+)")
 
 # Current servo positions
 servo1_pos = 90
@@ -203,7 +230,7 @@ servo2_pos = 90
 servo3_pos = 90
 
 # Control mode
-control_mode = "RANDOM"  # or "CONTROL"
+control_mode = "RANDOM"  # or "CONTROL" or "FOLLOW"
 
 # Movement speed
 movement_speed = 2.0
@@ -233,17 +260,18 @@ setup_styles()
 # Create frame to hold everything
 main_frame = ttk.Frame(root)
 main_frame.grid(column=0, row=0, sticky=(tk.N, tk.W, tk.E, tk.S), padx=10, pady=10)
-main_frame.columnconfigure(0, weight=3)  # Plot area
-main_frame.columnconfigure(1, weight=1)  # Control panel
+main_frame.columnconfigure(0, weight=1)  # Plot area - equal weight
+main_frame.columnconfigure(1, weight=1)  # Control panel - equal weight
 main_frame.rowconfigure(0, weight=1)
 
 # Create matplotlib figure with dark theme
 plt.style.use('dark_background')
-fig = plt.figure(figsize=(8, 6), facecolor=DARK_BG)
+fig = plt.figure(figsize=(6, 6), facecolor=DARK_BG)  # Reduced figure size
 ax = fig.add_subplot(111, projection='3d')
 ax.set_facecolor(DARKER_BG)
 line, = ax.plot([], [], [], lw=2, label='Orientation Path', color=HIGHLIGHT)
 dot = ax.plot([], [], [], marker='o', label='Current Orientation', color=ACCENT_COLOR, markersize=8)[0]
+ghost_line, = ax.plot([], [], [], lw=1, linestyle='--', label='Ghost Input', color='#aaaaaa')
 
 # Set initial axis limits
 ax.set_xlim(-plot_range, plot_range)
@@ -257,16 +285,95 @@ ax.tick_params(colors=TEXT_COLOR)
 ax.grid(True, linestyle='--', alpha=0.3)
 ax.legend(facecolor=DARKER_BG, edgecolor=HIGHLIGHT)
 
-# Embed matplotlib figure in Tkinter
+# Embed matplotlib figure in Tkinter with proper constraints
 plot_frame = ttk.Frame(main_frame)
-plot_frame.grid(column=0, row=0, sticky=(tk.N, tk.W, tk.E, tk.S))
+plot_frame.grid(column=0, row=0, sticky=(tk.N, tk.W, tk.E, tk.S), padx=(0, 10))
+plot_frame.rowconfigure(0, weight=1)
+plot_frame.columnconfigure(0, weight=1)
+
+# Use bbox_inches='tight' for better fitting
+fig.tight_layout(pad=2.0)
 canvas = FigureCanvasTkAgg(fig, master=plot_frame)
 canvas.draw()
-canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+canvas_widget = canvas.get_tk_widget()
+canvas_widget.grid(row=0, column=0, sticky=(tk.N, tk.W, tk.E, tk.S))
 
-# Create control panel with modern styling
-control_panel = ttk.Frame(main_frame, padding="15")
-control_panel.grid(column=1, row=0, sticky=(tk.N, tk.W, tk.E, tk.S))
+# Explicitly set the width and frame minimum size to prevent overflow
+def enforce_plot_size(event=None):
+    if event and event.widget == root:
+        # Calculate desired plot width (fixed maximum percentage of window width)
+        total_width = root.winfo_width()
+        plot_width = min(int(total_width * 0.5), 600)  # 50% of window width, max 600px
+        control_width = max(300, total_width - plot_width)  # Ensure controls have minimum width
+        
+        # Update column weights dynamically
+        main_frame.columnconfigure(0, minsize=plot_width)
+        main_frame.columnconfigure(1, minsize=control_width)
+        
+        # Force redraw
+        canvas.draw_idle()
+
+# Bind to root window size changes for plot resizing
+root.bind("<Configure>", enforce_plot_size)
+
+# Create control panel with modern styling and scrollbar
+control_panel_container = ttk.Frame(main_frame)
+control_panel_container.grid(column=1, row=0, sticky=(tk.N, tk.W, tk.E, tk.S))
+control_panel_container.rowconfigure(0, weight=1)
+control_panel_container.columnconfigure(0, weight=1)
+
+# Add scrollbar
+control_scrollbar = ttk.Scrollbar(control_panel_container, orient=tk.VERTICAL)
+control_scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
+
+# Create a canvas for scrolling
+control_canvas = tk.Canvas(control_panel_container, bg=DARK_BG, highlightthickness=0,
+                         yscrollcommand=control_scrollbar.set)
+control_canvas.grid(row=0, column=0, sticky=(tk.N, tk.W, tk.E, tk.S))
+control_scrollbar.config(command=control_canvas.yview)
+
+# Create a frame inside the canvas for the actual controls
+control_panel = ttk.Frame(control_canvas, padding="15")
+control_panel_window = control_canvas.create_window((0, 0), window=control_panel, anchor=tk.NW, tags="control_panel")
+
+# Configure the canvas to resize the inner frame when the window changes size
+def on_canvas_configure(event):
+    control_canvas.itemconfig("control_panel", width=event.width-5)  # -5 for padding
+    control_canvas.config(scrollregion=control_canvas.bbox("all"))
+
+control_canvas.bind("<Configure>", on_canvas_configure)
+
+# Update the scrollregion when the control panel changes size
+def update_scrollregion(event):
+    control_canvas.configure(scrollregion=control_canvas.bbox("all"))
+    
+control_panel.bind("<Configure>", update_scrollregion)
+
+# Update the main window's minimum size to prevent controls from being cut off
+def set_window_min_size():
+    # Ensure minimum width for comfortable viewing
+    required_width = 1000
+    required_height = 700
+    current_width = root.winfo_width()
+    current_height = root.winfo_height()
+    
+    if current_width < required_width or current_height < required_height:
+        new_width = max(current_width, required_width)
+        new_height = max(current_height, required_height)
+        root.geometry(f"{new_width}x{new_height}")
+
+# Call after window is fully loaded
+root.after(100, set_window_min_size)
+
+# Update the window title with resize instructions
+root.title("IMU Gimbal Control - 3D Orientation Tracker (Resize window for better view)")
+
+# Add a help message at the top of the control panel
+help_frame = ttk.Frame(control_panel)
+help_frame.pack(fill=tk.X, pady=(0, 10))
+help_text = "If controls are cut off, resize window or scroll down"
+help_label = ttk.Label(help_frame, text=help_text, foreground=ACCENT_COLOR)
+help_label.pack(fill=tk.X)
 
 # Mode selection
 mode_frame = ttk.LabelFrame(control_panel, text="Mode Selection", padding="10")
@@ -280,9 +387,11 @@ mode_var = tk.StringVar(value="RANDOM")
 
 # Mode radio buttons with better styling
 mode_random = ttk.Radiobutton(mode_options_frame, text="Random", variable=mode_var, value="RANDOM")
-mode_random.pack(side=tk.LEFT, padx=(0, 20))
+mode_random.pack(side=tk.LEFT, padx=(0, 10))
 mode_control = ttk.Radiobutton(mode_options_frame, text="Control", variable=mode_var, value="CONTROL")
-mode_control.pack(side=tk.LEFT)
+mode_control.pack(side=tk.LEFT, padx=(0, 10))
+mode_follow = ttk.Radiobutton(mode_options_frame, text="Follow IMU", variable=mode_var, value="FOLLOW")
+mode_follow.pack(side=tk.LEFT)
 
 # Start/Stop frame with modern buttons
 start_stop_frame = ttk.Frame(mode_frame)
@@ -351,16 +460,22 @@ servo_controls_frame.pack(fill=tk.X, pady=5)
 # Add a frame for gauges
 gauges_frame = ttk.Frame(servo_frame)
 gauges_frame.pack(fill=tk.X, pady=5)
+gauges_frame.columnconfigure(0, weight=1)
+gauges_frame.columnconfigure(1, weight=1)
+gauges_frame.columnconfigure(2, weight=1)
 
 # Create and place the gauges in a row
 gauge1 = CircularGauge(gauges_frame, servo1_var, size=110, label="Yaw")
-gauge1.pack(side=tk.LEFT, padx=5, expand=True)
+gauge1.grid(row=0, column=0, padx=5, sticky=(tk.N, tk.S, tk.E, tk.W))
 
 gauge2 = CircularGauge(gauges_frame, servo2_var, size=110, label="Pitch")
-gauge2.pack(side=tk.LEFT, padx=5, expand=True)
+gauge2.grid(row=0, column=1, padx=5, sticky=(tk.N, tk.S, tk.E, tk.W))
 
 gauge3 = CircularGauge(gauges_frame, servo3_var, size=110, label="Roll")
-gauge3.pack(side=tk.LEFT, padx=5, expand=True)
+gauge3.grid(row=0, column=2, padx=5, sticky=(tk.N, tk.S, tk.E, tk.W))
+
+# Add row and column configuration to make gauges resize
+gauges_frame.rowconfigure(0, weight=1)
 
 # Create modern sliders with better layout
 slider_frame = ttk.Frame(servo_frame)
@@ -417,6 +532,12 @@ def send_control_command():
         print(f"Switched to {control_mode} mode")
         ser.write(f"{control_mode}\n".encode())
         ser.flush()
+        
+        # When switching to random mode, start motion immediately if active
+        if control_mode == "RANDOM" and is_movement_active:
+            ser.write(b"START\n")
+            ser.flush()
+            print("Automatically starting random movement")
     
     if control_mode == "CONTROL":
         servo1_pos = servo1_var.get()
@@ -426,6 +547,27 @@ def send_control_command():
         ser.write(command.encode())
         ser.flush()
         print(f"Sent control command: {servo1_pos}, {servo2_pos}, {servo3_pos}")
+    elif control_mode == "FOLLOW" and second_imu_data["connected"]:
+        # Use the second IMU data to control servos
+        yaw = int(90 + second_imu_data["yaw"])
+        pitch = int(90 + second_imu_data["pitch"])
+        roll = int(90 + second_imu_data["roll"])
+        
+        # Constrain to valid servo range (0-180)
+        yaw = max(0, min(180, yaw))
+        pitch = max(0, min(180, pitch))
+        roll = max(0, min(180, roll))
+        
+        # Update the UI
+        servo1_var.set(yaw)
+        servo2_var.set(pitch)
+        servo3_var.set(roll)
+        
+        # Send command
+        command = f"CONTROL,{yaw},{pitch},{roll}\n"
+        ser.write(command.encode())
+        ser.flush()
+        print(f"Sent follow command: {yaw}, {pitch}, {roll}")
     
     # Also update speed if changed
     new_speed = speed_var.get()
@@ -491,13 +633,31 @@ ttk.Button(plot_frame_controls, text="Reset Plot", command=reset_plot).pack(anch
 imu_frame = ttk.LabelFrame(control_panel, text="IMU Controls", padding="10")
 imu_frame.pack(fill=tk.X, pady=10)
 
+# Home servos button
+def home_servos():
+    ser.write(b"HOME\n")
+    ser.flush()
+    print("Homing servos to middle position")
+    # Update the UI sliders to match
+    servo1_var.set(90)
+    servo2_var.set(90)
+    servo3_var.set(90)
+
+# Create frame for IMU control buttons
+imu_buttons_frame = ttk.Frame(imu_frame)
+imu_buttons_frame.pack(fill=tk.X, pady=5)
+imu_buttons_frame.columnconfigure(0, weight=1)
+imu_buttons_frame.columnconfigure(1, weight=1)
+
 # Zero IMU button with better styling
 def zero_imu():
     ser.write(b"ZERO\n")
     ser.flush()
     print("Zeroing IMU")
 
-ttk.Button(imu_frame, text="Zero IMU", command=zero_imu).pack(fill=tk.X, pady=5)
+# Add both buttons side by side
+ttk.Button(imu_buttons_frame, text="Zero IMU", command=zero_imu).grid(row=0, column=0, padx=(0, 5), sticky=(tk.W, tk.E))
+ttk.Button(imu_buttons_frame, text="Home Servos", command=home_servos).grid(row=0, column=1, padx=(5, 0), sticky=(tk.W, tk.E))
 
 # Status frame with better visualization
 status_frame = ttk.LabelFrame(control_panel, text="Status", padding="10")
@@ -590,8 +750,8 @@ def update_plot():
         try:
             line_raw = ser.readline().decode('utf-8', errors='replace').strip()
             
+            # Check for main IMU data
             match = euler_regex.match(line_raw)
-            
             if match:
                 yaw = float(match.group(1))
                 pitch = float(match.group(2))
@@ -622,6 +782,32 @@ def update_plot():
                         update_plot_limits()
                     
                     canvas.draw_idle()
+            # Check for second IMU data (for ghost trace and follow mode)
+            elif imu2_regex.match(line_raw):
+                imu2_match = imu2_regex.match(line_raw)
+                # Update second IMU data dictionary
+                second_imu_data["yaw"] = float(imu2_match.group(1))
+                second_imu_data["pitch"] = float(imu2_match.group(2))
+                second_imu_data["roll"] = float(imu2_match.group(3))
+                
+                # Update ghost trace lists
+                ghost_x_data.append(second_imu_data["yaw"])
+                ghost_y_data.append(second_imu_data["pitch"])
+                ghost_z_data.append(second_imu_data["roll"])
+                if len(ghost_x_data) > 200:
+                    ghost_x_data[:] = ghost_x_data[-200:]
+                    ghost_y_data[:] = ghost_y_data[-200:]
+                    ghost_z_data[:] = ghost_z_data[-200:]
+                
+                # Update ghost_line with new ghost trace data
+                ghost_line.set_data(ghost_x_data, ghost_y_data)
+                ghost_line.set_3d_properties(ghost_z_data)
+                
+                # If in follow mode, update the servos
+                if mode_var.get() == "FOLLOW" and is_movement_active:
+                    send_control_command()
+                
+                canvas.draw_idle()
             else:
                 # Print non-matching lines for debugging
                 if line_raw and not line_raw.startswith("Euler:"):
@@ -654,6 +840,131 @@ root.after(10, update_plot)
 
 # Send initial command to set up Arduino
 send_control_command()
+
+# Add a new section for second IMU status
+second_imu_frame = ttk.LabelFrame(control_panel, text="Second IMU Status", padding="10")
+second_imu_frame.pack(fill=tk.X, pady=10)
+
+# Status label
+second_imu_status_var = tk.StringVar(value="Not Connected")
+second_imu_status_label = ttk.Label(second_imu_frame, textvariable=second_imu_status_var)
+second_imu_status_label.pack(fill=tk.X, pady=5)
+
+# Button to search for second IMU
+def search_second_imu():
+    # This is a placeholder - implement actual second IMU connection logic
+    # For testing, we'll just simulate a connected IMU
+    second_imu_data["connected"] = True
+    second_imu_status_var.set("Connected (Simulated)")
+    second_imu_status_label.config(foreground=SUCCESS_COLOR)
+
+ttk.Button(second_imu_frame, text="Search for Second IMU", command=search_second_imu).pack(fill=tk.X, pady=5)
+
+# Add bindings for mouse wheel scrolling on different platforms
+def _on_mousewheel(event):
+    # This will work on most Linux and Windows
+    control_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+
+def _on_mousewheel_darwin(event):
+    # For MacOS
+    control_canvas.yview_scroll(int(-1*event.delta), "units")
+
+# Bind mousewheel events based on platform
+if root.tk.call('tk', 'windowingsystem') == 'aqua':  # macOS
+    control_canvas.bind_all("<MouseWheel>", _on_mousewheel_darwin)
+else:
+    control_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+    # For Linux with Xorg
+    control_canvas.bind_all("<Button-4>", lambda e: control_canvas.yview_scroll(-1, "units"))
+    control_canvas.bind_all("<Button-5>", lambda e: control_canvas.yview_scroll(1, "units"))
+
+# Add a compact mode toggle at the top of the UI
+compact_mode_var = tk.BooleanVar(value=False)
+
+def toggle_compact_mode():
+    is_compact = compact_mode_var.get()
+    
+    # Adjust layout based on compact mode
+    if is_compact:
+        # Make the gauges smaller and rearrange them
+        for gauge in [gauge1, gauge2, gauge3]:
+            gauge.min_size = 60
+            gauge.update_gauge()
+        
+        # Collapse some sections if window is too small
+        if root.winfo_width() < 1100:
+            # Hide some optional controls
+            second_imu_frame.pack_forget()
+            plot_frame_controls.pack_forget()
+            
+            # Show them again when expanded
+            compact_sections_btn.config(text="Show More Controls ▼")
+            compact_sections_btn.pack(fill=tk.X, pady=5)
+        
+        # Update the toggle button text
+        compact_mode_btn.config(text="Expand UI")
+    else:
+        # Reset gauge sizes to normal
+        for gauge in [gauge1, gauge2, gauge3]:
+            gauge.min_size = 80
+            gauge.update_gauge()
+        
+        # Restore any hidden sections
+        second_imu_frame.pack(fill=tk.X, pady=10)
+        plot_frame_controls.pack(fill=tk.X, pady=10)
+        
+        # Hide the "more controls" button
+        compact_sections_btn.pack_forget()
+        
+        # Update the toggle button text
+        compact_mode_btn.config(text="Compact UI")
+    
+    # Update the UI
+    control_panel.update_idletasks()
+    control_canvas.configure(scrollregion=control_canvas.bbox("all"))
+
+def toggle_compact_sections():
+    # Toggle visibility of secondary control sections
+    btn_text = compact_sections_btn.cget("text")
+    
+    if "Show" in btn_text:
+        # Show hidden sections
+        second_imu_frame.pack(fill=tk.X, pady=10)
+        plot_frame_controls.pack(fill=tk.X, pady=10)
+        compact_sections_btn.config(text="Hide Extra Controls ▲")
+    else:
+        # Hide sections
+        second_imu_frame.pack_forget()
+        plot_frame_controls.pack_forget()
+        compact_sections_btn.config(text="Show More Controls ▼")
+    
+    # Update the canvas scrollregion
+    control_panel.update_idletasks()
+    control_canvas.configure(scrollregion=control_canvas.bbox("all"))
+
+# Add compact mode toggle button at the top of the control panel
+view_controls_frame = ttk.Frame(control_panel)
+view_controls_frame.pack(fill=tk.X, pady=(0, 10))
+
+compact_mode_btn = ttk.Button(view_controls_frame, text="Compact UI", command=toggle_compact_mode)
+compact_mode_btn.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+# Create a more/less button that's initially hidden
+compact_sections_btn = ttk.Button(control_panel, text="Show More Controls ▼", command=toggle_compact_sections)
+# It will be shown when needed by the toggle_compact_mode function
+
+# Add a resize detection event that automatically switches to compact mode for small windows
+def check_window_size(event=None):
+    if event and event.widget == root:
+        if root.winfo_width() < 1100 and not compact_mode_var.get():
+            compact_mode_var.set(True)
+            toggle_compact_mode()
+        elif root.winfo_width() >= 1100 and compact_mode_var.get():
+            compact_mode_var.set(False)
+            toggle_compact_mode()
+
+# Bind to root window size changes
+root.bind("<Configure>", check_window_size)
 
 # Run the Tkinter main loop
 root.mainloop()

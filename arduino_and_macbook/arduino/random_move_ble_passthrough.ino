@@ -1,10 +1,14 @@
 #include <Wire.h>
-#include <Adafruit_BNO055.h>
-#include <Adafruit_Sensor.h>
 #include <Servo.h>
+#include <ArduinoBLE.h>
 
-Servo servo1, servo2, servo3;
-Adafruit_BNO055 bno = Adafruit_BNO055(55, 0x28); // Adjust the I2C address if needed
+Servo servo1, servo2, servo3;  // servo1 = Z axis (base), servo2 = Y axis, servo3 = X axis
+
+// BLE Service and Characteristics
+BLEService imuService("19B10000-E8F2-537E-4F6C-D104768A1214");
+BLECharacteristic imuDataChar("19B10001-E8F2-537E-4F6C-D104768A1214", BLERead | BLENotify, 20);
+BLECharacteristic servoDataChar("19B10002-E8F2-537E-4F6C-D104768A1214", BLERead | BLENotify, 20);
+BLECharacteristic controlChar("19B10003-E8F2-537E-4F6C-D104768A1214", BLEWrite, 20);
 
 // Current servo positions
 int servo1_pos = 90;
@@ -23,22 +27,42 @@ void setup() {
   Serial.begin(115200);
   Wire.begin();
 
+  // Initialize BLE
+  if (!BLE.begin()) {
+    Serial.println("Starting BLE failed!");
+    while (1);
+  }
+
+  // Set advertised local name and service UUID
+  BLE.setLocalName("IMU_Gimbal");
+  BLE.setAdvertisedService(imuService);
+
+  // Add characteristics to service
+  imuService.addCharacteristic(imuDataChar);
+  imuService.addCharacteristic(servoDataChar);
+  imuService.addCharacteristic(controlChar);
+
+  // Add service
+  BLE.addService(imuService);
+
+  // Set the initial value for the characteristics
+  imuDataChar.writeValue("0,0,0");
+  servoDataChar.writeValue("90,90,90");
+  controlChar.writeValue("RANDOM");
+
+  // Start advertising
+  BLE.advertise();
+  Serial.println("BLE IMU Gimbal Peripheral");
+
   // Attach servos to digital pins
-  servo1.attach(8);
-  servo2.attach(9);
-  servo3.attach(10);
+  servo1.attach(8);  // Z axis (base)
+  servo2.attach(9);  // Y axis
+  servo3.attach(10); // X axis
 
   // Initialize servos to center position
   servo1.write(servo1_pos);
   servo2.write(servo2_pos);
   servo3.write(servo3_pos);
-
-  if (!bno.begin()) {
-    Serial.println("BN055 not detected.");
-    while (1);
-  }
-  delay(1000);
-  bno.setExtCrystalUse(true);
 
   Serial.println("Setup complete");
 }
@@ -82,8 +106,12 @@ void updateServos() {
   servo2.write(servo2_pos);
   servo3.write(servo3_pos);
   
+  // Update BLE characteristic with current servo positions
+  String servoData = String(servo1_pos) + "," + String(servo2_pos) + "," + String(servo3_pos);
+  servoDataChar.writeValue(servoData.c_str());
+  
   // If all servos have reached targets and we're in random mode, set new targets
-  if (servo1_done && servo2_done && servo3_done && Serial.available() <= 0) {
+  if (servo1_done && servo2_done && servo3_done) {
     setNewRandomTargets();
   }
 }
@@ -149,26 +177,32 @@ void processCommand(String command) {
 }
 
 void loop() {
-  // Check for commands from Python
-  if (Serial.available()) {
-    String command = Serial.readStringUntil('\n');
-    processCommand(command);
+  // Listen for BLE peripherals to connect
+  BLEDevice central = BLE.central();
+
+  if (central) {
+    Serial.print("Connected to central: ");
+    Serial.println(central.address());
+
+    while (central.connected()) {
+      // Check if control characteristic has been written
+      if (controlChar.written()) {
+        String command = controlChar.value();
+        processCommand(command);
+      }
+
+      // Update servo positions (smooth movement)
+      updateServos();
+
+      // Update IMU data characteristic (simulated for now)
+      // TODO: Add actual IMU data reading
+      String imuData = "0,0,0"; // Replace with actual IMU data
+      imuDataChar.writeValue(imuData.c_str());
+
+      delay(20); // Update more frequently for smoother motion (50Hz)
+    }
+
+    Serial.print("Disconnected from central: ");
+    Serial.println(central.address());
   }
-
-  // Update servo positions (smooth movement)
-  updateServos();
-
-  // Read Euler orientation data from the BN055
-  sensors_event_t orientationData;
-  bno.getEvent(&orientationData, Adafruit_BNO055::VECTOR_EULER);
-
-  // Print Euler angles (yaw, pitch, roll) to serial in a simple format
-  Serial.print("Euler: ");
-  Serial.print(orientationData.orientation.x); // Yaw
-  Serial.print(", ");
-  Serial.print(orientationData.orientation.y); // Pitch
-  Serial.print(", ");
-  Serial.println(orientationData.orientation.z); // Roll
-
-  delay(20); // Update more frequently for smoother motion (50Hz)
 }

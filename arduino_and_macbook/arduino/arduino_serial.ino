@@ -21,7 +21,27 @@ float movement_speed = 2.0;
 
 // Movement state
 bool random_mode_active = false;
+bool follow_mode_active = false;
 bool movement_active = false;
+
+// Function to home servos to middle position
+void homeServos() {
+  // Set positions and targets to middle (90 degrees)
+  servo1_pos = 90;
+  servo2_pos = 90;
+  servo3_pos = 90;
+  
+  servo1_target = 90;
+  servo2_target = 90;
+  servo3_target = 90;
+  
+  // Apply positions to servos immediately
+  servo1.write(servo1_pos);
+  servo2.write(servo2_pos);
+  servo3.write(servo3_pos);
+  
+  Serial.println("Servos homed to middle position");
+}
 
 void setup() {
   Serial.begin(115200);
@@ -32,13 +52,14 @@ void setup() {
   servo2.attach(9);
   servo3.attach(10);
 
-  // Initialize servos to center position
-  servo1.write(servo1_pos);
-  servo2.write(servo2_pos);
-  servo3.write(servo3_pos);
+  // Explicitly home servos to middle position
+  homeServos();
+
+  // Delay to allow servos to reach position
+  delay(500);
 
   if (!bno.begin()) {
-    Serial.println("BN055 not detected.");
+    Serial.println("BNO055 not detected.");
     while (1);
   }
   delay(1000);
@@ -48,21 +69,26 @@ void setup() {
 }
 
 void setNewRandomTargets() {
-  // Generate new targets at least 20 degrees away from current position
+  // Generate new targets that ensure at least 2 servos will move significantly
   int new_pos1, new_pos2, new_pos3;
+  int min_moving_servos = 0;
   
+  // Keep generating new targets until at least 2 servos will move
   do {
+    // Generate random positions
     new_pos1 = random(0, 180);
-  } while (abs(new_pos1 - servo1_pos) < 20);
-  
-  do {
     new_pos2 = random(0, 180);
-  } while (abs(new_pos2 - servo2_pos) < 20);
-  
-  do {
     new_pos3 = random(0, 180);
-  } while (abs(new_pos3 - servo3_pos) < 20);
+    
+    // Count how many servos will move significantly (more than 20 degrees)
+    min_moving_servos = 0;
+    if (abs(new_pos1 - servo1_pos) > 20) min_moving_servos++;
+    if (abs(new_pos2 - servo2_pos) > 20) min_moving_servos++;
+    if (abs(new_pos3 - servo3_pos) > 20) min_moving_servos++;
+    
+  } while (min_moving_servos < 2); // Ensure at least 2 servos will move
   
+  // Apply the new targets
   servo1_target = new_pos1;
   servo2_target = new_pos2;
   servo3_target = new_pos3;
@@ -93,7 +119,11 @@ void updateServos() {
   
   // If all servos have reached targets and we're in random mode, set new targets
   if (servo1_done && servo2_done && servo3_done && random_mode_active) {
+    // Immediately set new targets to keep motion continuous
     setNewRandomTargets();
+    
+    // Debug log
+    Serial.println("All servos reached targets, setting new random targets");
   }
 }
 
@@ -116,14 +146,26 @@ void processCommand(String command) {
   command.trim(); // Remove any whitespace or newlines
   
   if (command.startsWith("RANDOM")) {
-    // Enable random mode but don't start movement yet
+    // Enable random mode and start movement
     random_mode_active = true;
-    movement_active = false;
-    Serial.println("Random mode enabled. Use START to begin movement.");
+    follow_mode_active = false;
+    movement_active = true;  // Start movement immediately
+    Serial.println("Random mode enabled and movement started.");
+    
+    // Pre-generate random targets so they're ready
+    setNewRandomTargets();
+  }
+  else if (command.startsWith("FOLLOW")) {
+    // Enable follow mode
+    random_mode_active = false;
+    follow_mode_active = true;
+    movement_active = true; // Auto-start in follow mode
+    Serial.println("Follow mode enabled. Ready to follow second IMU.");
   }
   else if (command.startsWith("CONTROL")) {
     // Switch to control mode
     random_mode_active = false;
+    follow_mode_active = false;
     movement_active = true;
     
     // Parse the command format: CONTROL,servo1,servo2,servo3
@@ -163,16 +205,22 @@ void processCommand(String command) {
   }
   else if (command.startsWith("START")) {
     // Start movement based on current mode
+    movement_active = true;
     if (random_mode_active) {
       setNewRandomTargets(); // Set initial random targets
     }
-    movement_active = true;
     Serial.println("Movement started");
   }
   else if (command.startsWith("STOP")) {
     // Stop movement
     movement_active = false;
     Serial.println("Movement stopped");
+  }
+  else if (command.startsWith("HOME")) {
+    // Home servos to middle position
+    homeServos();
+    // Maintain current mode state
+    Serial.println("Servos homed to middle position");
   }
   else if (command.startsWith("SPEED")) {
     // Allow adjusting the movement speed
@@ -192,6 +240,12 @@ void processCommand(String command) {
     delay(10);
     bno.setExtCrystalUse(true);
     Serial.println("IMU reset requested");
+  }
+  else if (command.startsWith("IMU2:")) {
+    // Handle second IMU data received from Python
+    // This would be used in a more advanced setup where data from a second IMU
+    // is sent from Python to the Arduino
+    Serial.println("Received second IMU data");
   }
 }
 
