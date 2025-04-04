@@ -14,6 +14,51 @@ from PIL import Image, ImageTk, ImageDraw  # For custom widget rendering
 import math
 import colorsys
 
+# Kalman Filter implementation for 3D orientation
+class KalmanFilter3D:
+    def __init__(self, process_noise=0.1, measurement_noise=1.0):
+        # State vector: [yaw, pitch, roll, yaw_rate, pitch_rate, roll_rate]
+        self.state = np.zeros(6)
+        self.covariance = np.eye(6) * 1000  # Initial uncertainty
+        
+        # Process noise covariance
+        self.Q = np.eye(6) * process_noise
+        
+        # Measurement noise covariance
+        self.R = np.eye(3) * measurement_noise
+        
+        # State transition matrix (assuming constant velocity model)
+        self.F = np.eye(6)
+        self.F[0:3, 3:6] = np.eye(3)  # Position depends on velocity
+        
+        # Measurement matrix (we only measure position)
+        self.H = np.zeros((3, 6))
+        self.H[0:3, 0:3] = np.eye(3)
+        
+        # Time step (in seconds)
+        self.dt = 0.01  # 10ms update rate
+        
+    def predict(self):
+        # Predict state
+        self.state = self.F @ self.state
+        
+        # Predict covariance
+        self.covariance = self.F @ self.covariance @ self.F.T + self.Q
+        
+    def update(self, measurement):
+        # Kalman gain
+        K = self.covariance @ self.H.T @ np.linalg.inv(self.H @ self.covariance @ self.H.T + self.R)
+        
+        # Update state
+        innovation = measurement - self.H @ self.state
+        self.state = self.state + K @ innovation
+        
+        # Update covariance
+        self.covariance = (np.eye(6) - K @ self.H) @ self.covariance
+        
+        # Return filtered measurement
+        return self.state[0:3]
+
 # Custom theme and style constants
 DARK_BG = "#2E2E2E"
 DARKER_BG = "#252525"
@@ -81,6 +126,10 @@ except serial.SerialException as e:
 
 # Lists to hold Euler angle data: x (yaw), y (pitch), z (roll)
 x_data, y_data, z_data = [], [], []
+x_filtered, y_filtered, z_filtered = [], [], []
+
+# Initialize Kalman filter
+kalman_filter = KalmanFilter3D(process_noise=0.1, measurement_noise=1.0)
 
 # Regular expression to parse serial data of the form: "Euler: 45.0, -30.0, 10.0"
 euler_regex = re.compile(r"Euler:\s*([\d\.-]+),\s*([\d\.-]+),\s*([\d\.-]+)")
@@ -113,6 +162,7 @@ fig = plt.figure(figsize=(8, 6), facecolor=DARK_BG)
 ax = fig.add_subplot(111, projection='3d')
 ax.set_facecolor(DARKER_BG)
 line, = ax.plot([], [], [], lw=2, label='Orientation Path', color=HIGHLIGHT)
+filtered_line, = ax.plot([], [], [], lw=2, label='Filtered Path', color=SUCCESS_COLOR)
 dot = ax.plot([], [], [], marker='o', label='Current Orientation', color=ACCENT_COLOR, markersize=8)[0]
 
 # Set initial axis limits
@@ -150,10 +200,13 @@ auto_resize_check.pack(anchor=tk.W, pady=5)
 
 # Reset plot button
 def reset_plot():
-    global x_data, y_data, z_data
+    global x_data, y_data, z_data, x_filtered, y_filtered, z_filtered
     x_data.clear()
     y_data.clear()
     z_data.clear()
+    x_filtered.clear()
+    y_filtered.clear()
+    z_filtered.clear()
     update_plot_limits()
     canvas.draw_idle()
 
@@ -168,6 +221,9 @@ def zero_imu():
     ser.write(b"ZERO\n")
     ser.flush()
     print("Zeroing IMU")
+    # Reset Kalman filter
+    global kalman_filter
+    kalman_filter = KalmanFilter3D(process_noise=0.1, measurement_noise=1.0)
 
 ttk.Button(imu_frame, text="Zero IMU", command=zero_imu).pack(fill=tk.X, pady=5)
 
@@ -229,10 +285,10 @@ def update_plot_limits():
     if not auto_resize_var.get() or not x_data:
         return
     
-    # Calculate needed range with some padding
-    x_min, x_max = min(x_data), max(x_data)
-    y_min, y_max = min(y_data), max(y_data)
-    z_min, z_max = min(z_data), max(z_data)
+    # Calculate needed range with some padding using filtered data
+    x_min, x_max = min(x_filtered), max(x_filtered)
+    y_min, y_max = min(y_filtered), max(y_filtered)
+    z_min, z_max = min(z_filtered), max(z_filtered)
     
     # Add 10% padding
     x_range = max(abs(x_min), abs(x_max)) * 1.1
@@ -248,7 +304,7 @@ def update_plot_limits():
 
 # Function to update the plot
 def update_plot():
-    global x_data, y_data, z_data
+    global x_data, y_data, z_data, x_filtered, y_filtered, z_filtered
     
     # Read all available data from the serial port
     while ser.in_waiting > 0:
@@ -262,25 +318,41 @@ def update_plot():
                 pitch = float(match.group(2))
                 roll = float(match.group(3))
                 
+                # Apply Kalman filter
+                measurement = np.array([yaw, pitch, roll])
+                kalman_filter.predict()
+                filtered = kalman_filter.update(measurement)
+                
+                # Store raw data
                 x_data.append(yaw)
                 y_data.append(pitch)
                 z_data.append(roll)
                 
-                # Update visual angle displays
-                update_angle_display(yaw, pitch, roll)
+                # Store filtered data
+                x_filtered.append(filtered[0])
+                y_filtered.append(filtered[1])
+                z_filtered.append(filtered[2])
+                
+                # Update visual angle displays with filtered values
+                update_angle_display(filtered[0], filtered[1], filtered[2])
                 
                 # Limit history to last 200 points for clarity
                 if len(x_data) > 200:
                     x_data[:] = x_data[-200:]
                     y_data[:] = y_data[-200:]
                     z_data[:] = z_data[-200:]
+                    x_filtered[:] = x_filtered[-200:]
+                    y_filtered[:] = y_filtered[-200:]
+                    z_filtered[:] = z_filtered[-200:]
                 
-                # Update the plotted line and the current position dot
+                # Update the plotted lines and the current position dot
                 if len(x_data) > 0:
                     line.set_data(x_data, y_data)
                     line.set_3d_properties(z_data)
-                    dot.set_data(x_data[-1:], y_data[-1:])
-                    dot.set_3d_properties(z_data[-1:])
+                    filtered_line.set_data(x_filtered, y_filtered)
+                    filtered_line.set_3d_properties(z_filtered)
+                    dot.set_data(x_filtered[-1:], y_filtered[-1:])
+                    dot.set_3d_properties(z_filtered[-1:])
                     
                     # Update plot limits if auto-resize is enabled
                     if len(x_data) > 1 and len(x_data) % 10 == 0:  # Only check every 10 points
