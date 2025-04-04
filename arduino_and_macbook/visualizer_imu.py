@@ -108,6 +108,13 @@ def setup_styles():
     
     # Configure Scale (slider)
     style.configure('TScale', background=DARK_BG, troughcolor=DARKER_BG)
+    
+    # Configure Notebook (tabbed interface)
+    style.configure('TNotebook', background=DARK_BG, borderwidth=0)
+    style.configure('TNotebook.Tab', background=DARKER_BG, foreground=TEXT_COLOR, padding=[10, 5])
+    style.map('TNotebook.Tab',
+              background=[('selected', HIGHLIGHT)],
+              foreground=[('selected', TEXT_COLOR)])
 
 # Try to find Arduino port automatically, otherwise use default
 PORT = find_arduino_port() or '/dev/tty.usbmodem101'
@@ -137,6 +144,7 @@ euler_regex = re.compile(r"Euler:\s*([\d\.-]+),\s*([\d\.-]+),\s*([\d\.-]+)")
 # Auto-resize plot flag
 auto_resize = True
 plot_range = 180  # Initial plot range
+show_controls = True  # Control panel visibility
 
 # Create main Tkinter window
 root = tk.Tk()
@@ -149,21 +157,43 @@ root.rowconfigure(0, weight=1)
 # Setup modern styles
 setup_styles()
 
-# Create frame to hold everything
+# Create main container frame
 main_frame = ttk.Frame(root)
 main_frame.grid(column=0, row=0, sticky=(tk.N, tk.W, tk.E, tk.S), padx=10, pady=10)
-main_frame.columnconfigure(0, weight=3)  # Plot area
-main_frame.columnconfigure(1, weight=1)  # Control panel
+main_frame.columnconfigure(0, weight=1)
 main_frame.rowconfigure(0, weight=1)
+
+# Create paned window for resizable panels
+paned_window = ttk.PanedWindow(main_frame, orient=tk.HORIZONTAL)
+paned_window.grid(column=0, row=0, sticky=(tk.N, tk.W, tk.E, tk.S))
+
+# Left panel for plot
+plot_frame = ttk.Frame(paned_window)
+plot_frame.columnconfigure(0, weight=1)
+plot_frame.rowconfigure(0, weight=1)
+
+# Right panel for controls using notebook (tabs)
+control_frame = ttk.Frame(paned_window)
+control_frame.columnconfigure(0, weight=1)
+control_frame.rowconfigure(0, weight=1)
+
+# Add frames to paned window
+paned_window.add(plot_frame, weight=3)
+paned_window.add(control_frame, weight=1)
 
 # Create matplotlib figure with dark theme
 plt.style.use('dark_background')
 fig = plt.figure(figsize=(8, 6), facecolor=DARK_BG)
 ax = fig.add_subplot(111, projection='3d')
 ax.set_facecolor(DARKER_BG)
+
+# Create path lines for visualization
 line, = ax.plot([], [], [], lw=2, label='Orientation Path', color=HIGHLIGHT)
 filtered_line, = ax.plot([], [], [], lw=2, label='Filtered Path', color=SUCCESS_COLOR)
 dot = ax.plot([], [], [], marker='o', label='Current Orientation', color=ACCENT_COLOR, markersize=8)[0]
+
+# Create arrow for direction visualization
+quiver = None  # Initialize as None, will be created during first update
 
 # Set initial axis limits
 ax.set_xlim(-plot_range, plot_range)
@@ -175,21 +205,62 @@ ax.set_ylabel("Pitch", color=TEXT_COLOR)
 ax.set_zlabel("Roll", color=TEXT_COLOR)
 ax.tick_params(colors=TEXT_COLOR)
 ax.grid(True, linestyle='--', alpha=0.3)
-ax.legend(facecolor=DARKER_BG, edgecolor=HIGHLIGHT)
 
 # Embed matplotlib figure in Tkinter
-plot_frame = ttk.Frame(main_frame)
-plot_frame.grid(column=0, row=0, sticky=(tk.N, tk.W, tk.E, tk.S))
-canvas = FigureCanvasTkAgg(fig, master=plot_frame)
-canvas.draw()
-canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+canvas_frame = ttk.Frame(plot_frame)
+canvas_frame.grid(column=0, row=0, sticky=(tk.N, tk.W, tk.E, tk.S))
+canvas_frame.columnconfigure(0, weight=1)
+canvas_frame.rowconfigure(0, weight=1)
 
-# Create control panel with modern styling
-control_panel = ttk.Frame(main_frame, padding="15")
-control_panel.grid(column=1, row=0, sticky=(tk.N, tk.W, tk.E, tk.S))
+canvas = FigureCanvasTkAgg(fig, master=canvas_frame)
+canvas.draw()
+canvas_widget = canvas.get_tk_widget()
+canvas_widget.grid(column=0, row=0, sticky=(tk.N, tk.W, tk.E, tk.S))
+
+# Create notebook (tabbed interface) for controls
+notebook = ttk.Notebook(control_frame)
+notebook.grid(column=0, row=0, sticky=(tk.N, tk.W, tk.E, tk.S), padx=5, pady=5)
+notebook.columnconfigure(0, weight=1)
+notebook.rowconfigure(0, weight=1)
+
+# Create tabs
+controls_tab = ttk.Frame(notebook)
+legend_tab = ttk.Frame(notebook)
+notebook.add(controls_tab, text='Controls')
+notebook.add(legend_tab, text='Legend')
+
+# Ensure paned window initially divides space equally
+def configure_paned_window(event=None):
+    total_width = paned_window.winfo_width()
+    if total_width > 10:  # Only adjust when there's enough width
+        if show_controls:
+            paned_window.sashpos(0, total_width // 2)
+
+# Bind to configure event to ensure proper sizing
+paned_window.bind("<Configure>", configure_paned_window)
+
+# Toggle control panel visibility
+def toggle_controls():
+    global show_controls
+    show_controls = not show_controls
+    if show_controls:
+        paned_window.add(control_frame, weight=1)
+        toggle_btn.config(text="Hide Controls")
+        # Force equal division
+        root.after(100, configure_paned_window)
+    else:
+        paned_window.forget(control_frame)
+        toggle_btn.config(text="Show Controls")
+
+# Add toggle button to plot frame
+toggle_btn = ttk.Button(plot_frame, text="Hide Controls", command=toggle_controls)
+toggle_btn.grid(column=0, row=1, sticky=tk.SE, padx=5, pady=5)
+
+# Controls tab content
+controls_tab.columnconfigure(0, weight=1)
 
 # Plot control frame
-plot_frame_controls = ttk.LabelFrame(control_panel, text="Plot Controls", padding="10")
+plot_frame_controls = ttk.LabelFrame(controls_tab, text="Plot Controls", padding="10")
 plot_frame_controls.pack(fill=tk.X, pady=10)
 
 # Auto-resize toggle with better styling
@@ -213,7 +284,7 @@ def reset_plot():
 ttk.Button(plot_frame_controls, text="Reset Plot", command=reset_plot).pack(anchor=tk.W, pady=5, fill=tk.X)
 
 # IMU control frame
-imu_frame = ttk.LabelFrame(control_panel, text="IMU Controls", padding="10")
+imu_frame = ttk.LabelFrame(controls_tab, text="IMU Controls", padding="10")
 imu_frame.pack(fill=tk.X, pady=10)
 
 # Zero IMU button with better styling
@@ -228,7 +299,7 @@ def zero_imu():
 ttk.Button(imu_frame, text="Zero IMU", command=zero_imu).pack(fill=tk.X, pady=5)
 
 # Status frame with better visualization
-status_frame = ttk.LabelFrame(control_panel, text="Status", padding="10")
+status_frame = ttk.LabelFrame(controls_tab, text="Status", padding="10")
 status_frame.pack(fill=tk.X, pady=10)
 
 # Current angles display with better styling
@@ -266,6 +337,31 @@ roll_progress = ttk.Progressbar(angle_display, orient=tk.HORIZONTAL, mode='deter
 roll_progress.grid(row=2, column=1, sticky=(tk.W, tk.E), padx=5, pady=2)
 ttk.Label(angle_display, textvariable=roll_var).grid(row=2, column=2, sticky=tk.E, pady=2)
 
+# Custom legend in the Legend tab
+legend_frame = ttk.Frame(legend_tab, padding=10)
+legend_frame.pack(fill=tk.BOTH, expand=True)
+
+# Create custom legend items
+legend_items = [
+    {"label": "Orientation Path", "color": HIGHLIGHT},
+    {"label": "Filtered Path", "color": SUCCESS_COLOR},
+    {"label": "Current Position", "color": ACCENT_COLOR},
+    {"label": "Direction Arrow", "color": DANGER_COLOR}
+]
+
+# Add legend items to legend tab
+for i, item in enumerate(legend_items):
+    frame = ttk.Frame(legend_frame)
+    frame.pack(anchor=tk.W, pady=5, fill=tk.X)
+    
+    # Color box
+    canvas = tk.Canvas(frame, width=20, height=20, bg=DARK_BG, highlightthickness=0)
+    canvas.create_rectangle(2, 2, 18, 18, fill=item["color"], outline="")
+    canvas.pack(side=tk.LEFT, padx=5)
+    
+    # Label
+    ttk.Label(frame, text=item["label"]).pack(side=tk.LEFT, padx=5)
+
 # Update angle display function
 def update_angle_display(yaw, pitch, roll):
     """Update the angle display with current values"""
@@ -302,9 +398,25 @@ def update_plot_limits():
     ax.set_ylim(-max_range, max_range)
     ax.set_zlim(-max_range, max_range)
 
+# Function to convert Euler angles to direction vector
+def euler_to_vector(yaw, pitch, roll):
+    """Convert Euler angles to a direction vector."""
+    # Convert angles from degrees to radians
+    yaw_rad = math.radians(yaw)
+    pitch_rad = math.radians(pitch)
+    roll_rad = math.radians(roll)
+    
+    # Calculate direction vector (basic implementation)
+    # This assumes yaw is rotation around Z, pitch around Y, roll around X
+    x = math.cos(yaw_rad) * math.cos(pitch_rad)
+    y = math.sin(yaw_rad) * math.cos(pitch_rad)
+    z = math.sin(pitch_rad)
+    
+    return [x, y, z]
+
 # Function to update the plot
 def update_plot():
-    global x_data, y_data, z_data, x_filtered, y_filtered, z_filtered
+    global x_data, y_data, z_data, x_filtered, y_filtered, z_filtered, quiver
     
     # Read all available data from the serial port
     while ser.in_waiting > 0:
@@ -354,11 +466,30 @@ def update_plot():
                     dot.set_data(x_filtered[-1:], y_filtered[-1:])
                     dot.set_3d_properties(z_filtered[-1:])
                     
+                    # Update the direction arrow
+                    if len(x_filtered) > 0:
+                        # Get current position
+                        pos = [x_filtered[-1], y_filtered[-1], z_filtered[-1]]
+                        
+                        # Calculate direction vector
+                        direction = euler_to_vector(filtered[0], filtered[1], filtered[2])
+                        
+                        # Remove previous quiver
+                        if quiver:
+                            quiver.remove()
+                        
+                        # Create new quiver
+                        quiver = ax.quiver(pos[0], pos[1], pos[2], 
+                                         direction[0], direction[1], direction[2],
+                                         color=DANGER_COLOR, length=20, normalize=True, 
+                                         arrow_length_ratio=0.2)
+                    
                     # Update plot limits if auto-resize is enabled
                     if len(x_data) > 1 and len(x_data) % 10 == 0:  # Only check every 10 points
                         update_plot_limits()
                     
-                    canvas.draw_idle()
+                    # Use draw instead of draw_idle
+                    canvas.draw()
             else:
                 # Print non-matching lines for debugging
                 if line_raw and not line_raw.startswith("Euler:"):
@@ -376,6 +507,8 @@ def update_plot():
 
 # Start the update process
 root.after(10, update_plot)
+# Call configure_paned_window after a delay to ensure proper initial sizing
+root.after(100, configure_paned_window)
 
 # Run the Tkinter main loop
 root.mainloop()
