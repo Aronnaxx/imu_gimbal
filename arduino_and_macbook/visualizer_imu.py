@@ -368,40 +368,10 @@ ttk.Button(imu_frame, text="Zero IMU", command=zero_imu).pack(fill=tk.X, pady=5)
 status_frame = ttk.LabelFrame(controls_tab, text="Status", padding="10")
 status_frame.pack(fill=tk.X, pady=10)
 
-# Current angles display with better styling
-angles_display_frame = ttk.Frame(status_frame)
-angles_display_frame.pack(fill=tk.X, pady=5)
-
 # Variables for each angle
 yaw_var = tk.DoubleVar(value=0.0)
 pitch_var = tk.DoubleVar(value=0.0)
 roll_var = tk.DoubleVar(value=0.0)
-
-# Create better angle displays
-angle_display = ttk.Frame(status_frame)
-angle_display.pack(fill=tk.X, pady=5)
-angle_display.columnconfigure(1, weight=1)
-
-# Yaw display
-ttk.Label(angle_display, text="Yaw:").grid(row=0, column=0, sticky=tk.W, pady=2)
-yaw_progress = ttk.Progressbar(angle_display, orient=tk.HORIZONTAL, mode='determinate',
-                              maximum=180, value=90)
-yaw_progress.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=5, pady=2)
-ttk.Label(angle_display, textvariable=yaw_var).grid(row=0, column=2, sticky=tk.E, pady=2)
-
-# Pitch display
-ttk.Label(angle_display, text="Pitch:").grid(row=1, column=0, sticky=tk.W, pady=2)
-pitch_progress = ttk.Progressbar(angle_display, orient=tk.HORIZONTAL, mode='determinate',
-                               maximum=180, value=90)
-pitch_progress.grid(row=1, column=1, sticky=(tk.W, tk.E), padx=5, pady=2)
-ttk.Label(angle_display, textvariable=pitch_var).grid(row=1, column=2, sticky=tk.E, pady=2)
-
-# Roll display
-ttk.Label(angle_display, text="Roll:").grid(row=2, column=0, sticky=tk.W, pady=2)
-roll_progress = ttk.Progressbar(angle_display, orient=tk.HORIZONTAL, mode='determinate',
-                              maximum=180, value=90)
-roll_progress.grid(row=2, column=1, sticky=(tk.W, tk.E), padx=5, pady=2)
-ttk.Label(angle_display, textvariable=roll_var).grid(row=2, column=2, sticky=tk.E, pady=2)
 
 # Custom legend in the Legend tab
 legend_frame = ttk.Frame(legend_tab, padding=10)
@@ -428,6 +398,137 @@ for i, item in enumerate(legend_items):
     # Label
     ttk.Label(frame, text=item["label"]).pack(side=tk.LEFT, padx=5)
 
+# Create a separator between legend and angle displays
+ttk.Separator(legend_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
+
+# Create angle displays frame in the legend tab
+angle_display_frame = ttk.LabelFrame(legend_frame, text="Angle Displays", padding="10")
+angle_display_frame.pack(fill=tk.X, pady=10)
+
+# Create better angle displays
+angle_display = ttk.Frame(angle_display_frame)
+angle_display.pack(fill=tk.X, pady=5)
+angle_display.columnconfigure(1, weight=1)
+
+# Yaw display
+ttk.Label(angle_display, text="Yaw:").grid(row=0, column=0, sticky=tk.W, pady=2)
+yaw_progress = ttk.Progressbar(angle_display, orient=tk.HORIZONTAL, mode='determinate',
+                              maximum=180, value=90)
+yaw_progress.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=5, pady=2)
+ttk.Label(angle_display, textvariable=yaw_var).grid(row=0, column=2, sticky=tk.E, pady=2)
+
+# Pitch display
+ttk.Label(angle_display, text="Pitch:").grid(row=1, column=0, sticky=tk.W, pady=2)
+pitch_progress = ttk.Progressbar(angle_display, orient=tk.HORIZONTAL, mode='determinate',
+                               maximum=180, value=90)
+pitch_progress.grid(row=1, column=1, sticky=(tk.W, tk.E), padx=5, pady=2)
+ttk.Label(angle_display, textvariable=pitch_var).grid(row=1, column=2, sticky=tk.E, pady=2)
+
+# Roll display
+ttk.Label(angle_display, text="Roll:").grid(row=2, column=0, sticky=tk.W, pady=2)
+roll_progress = ttk.Progressbar(angle_display, orient=tk.HORIZONTAL, mode='determinate',
+                              maximum=180, value=90)
+roll_progress.grid(row=2, column=1, sticky=(tk.W, tk.E), padx=5, pady=2)
+ttk.Label(angle_display, textvariable=roll_var).grid(row=2, column=2, sticky=tk.E, pady=2)
+
+# Create a separator between angle bars and gauges
+ttk.Separator(legend_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
+
+# Create circular gauges frame
+gauges_frame = ttk.LabelFrame(legend_frame, text="Circular Gauges", padding="10")
+gauges_frame.pack(fill=tk.X, pady=10)
+
+# Create a frame for the gauges
+gauges_container = ttk.Frame(gauges_frame)
+gauges_container.pack(fill=tk.X, pady=5)
+
+# Create circular gauge class
+class CircularGauge(tk.Canvas):
+    def __init__(self, parent, width, height, min_value=-180, max_value=180, 
+                 title="", bg=DARK_BG, fg=TEXT_COLOR, highlightthickness=0):
+        super().__init__(parent, width=width, height=height, bg=bg, highlightthickness=highlightthickness)
+        self.width = width
+        self.height = height
+        self.min_value = min_value
+        self.max_value = max_value
+        self.title = title
+        self.fg = fg
+        
+        # Create the gauge
+        self.create_gauge()
+        
+    def create_gauge(self):
+        # Draw the gauge background (semi-circle)
+        center_x = self.width // 2
+        center_y = self.height - 10
+        radius = min(center_x, center_y) - 10
+        
+        # Draw the arc background
+        self.create_arc(center_x - radius, center_y - radius, 
+                        center_x + radius, center_y + radius,
+                        start=0, extent=180, fill=DARKER_BG, outline=self.fg)
+        
+        # Draw tick marks
+        for i in range(0, 181, 30):
+            angle_rad = math.radians(i)
+            inner_x = center_x + (radius - 10) * math.cos(angle_rad)
+            inner_y = center_y - (radius - 10) * math.sin(angle_rad)
+            outer_x = center_x + radius * math.cos(angle_rad)
+            outer_y = center_y - radius * math.sin(angle_rad)
+            
+            self.create_line(inner_x, inner_y, outer_x, outer_y, fill=self.fg)
+            
+            # Add labels for major ticks
+            if i % 90 == 0:
+                label_x = center_x + (radius - 25) * math.cos(angle_rad)
+                label_y = center_y - (radius - 25) * math.sin(angle_rad)
+                self.create_text(label_x, label_y, text=str(i), fill=self.fg)
+        
+        # Draw the title
+        self.create_text(center_x, 15, text=self.title, fill=self.fg)
+        
+        # Create the needle (initially at 0)
+        self.needle = self.create_line(center_x, center_y, center_x, center_y - radius + 20, 
+                                      fill=HIGHLIGHT, width=2)
+        
+        # Create the value text
+        self.value_text = self.create_text(center_x, center_y + 15, text="0.0°", fill=self.fg)
+        
+    def update_value(self, value):
+        # Clamp value to range
+        value = max(self.min_value, min(self.max_value, value))
+        
+        # Calculate angle (0-180 degrees)
+        angle = (value - self.min_value) / (self.max_value - self.min_value) * 180
+        
+        # Convert to radians
+        angle_rad = math.radians(angle)
+        
+        # Calculate needle end point
+        center_x = self.width // 2
+        center_y = self.height - 10
+        radius = min(center_x, center_y) - 10
+        
+        end_x = center_x + (radius - 20) * math.cos(angle_rad)
+        end_y = center_y - (radius - 20) * math.sin(angle_rad)
+        
+        # Update needle position
+        self.coords(self.needle, center_x, center_y, end_x, end_y)
+        
+        # Update value text
+        self.itemconfig(self.value_text, text=f"{value:.1f}°")
+
+# Create gauges
+gauge_size = 120
+yaw_gauge = CircularGauge(gauges_container, gauge_size, gauge_size//2 + 10, title="Yaw")
+yaw_gauge.pack(side=tk.LEFT, padx=10, expand=True)
+
+pitch_gauge = CircularGauge(gauges_container, gauge_size, gauge_size//2 + 10, title="Pitch")
+pitch_gauge.pack(side=tk.LEFT, padx=10, expand=True)
+
+roll_gauge = CircularGauge(gauges_container, gauge_size, gauge_size//2 + 10, title="Roll")
+roll_gauge.pack(side=tk.LEFT, padx=10, expand=True)
+
 # Update angle display function
 def update_angle_display(yaw, pitch, roll):
     """Update the angle display with current values"""
@@ -441,6 +542,11 @@ def update_angle_display(yaw, pitch, roll):
     yaw_progress['value'] = (yaw + 90) % 180
     pitch_progress['value'] = (pitch + 90) % 180
     roll_progress['value'] = (roll + 90) % 180
+    
+    # Update circular gauges
+    yaw_gauge.update_value(yaw)
+    pitch_gauge.update_value(pitch)
+    roll_gauge.update_value(roll)
 
 # Function to update plot limits based on data
 def update_plot_limits():
