@@ -14,6 +14,44 @@ from PIL import Image, ImageTk, ImageDraw  # For custom widget rendering
 import math
 import colorsys
 
+# Performance settings
+REDRAW_INTERVAL = 100  # ms between redraws (higher = less CPU usage but less smooth)
+DATA_HISTORY_LENGTH = 200  # Reduce history length to improve performance
+QUIVER_SCALE = 30  # Scale of the direction arrow
+
+# Angle unwrapping for yaw (prevents discontinuities at 0/360)
+class AngleUnwrapper:
+    def __init__(self):
+        self.previous_angle = None
+        self.offset = 0
+        
+    def unwrap(self, angle):
+        """Unwrap angle to avoid jumps when crossing 0/360 boundary"""
+        # First angle we get, just return it
+        if self.previous_angle is None:
+            self.previous_angle = angle
+            return angle
+        
+        # Detect if we've crossed the discontinuity
+        diff = angle - self.previous_angle
+        
+        # If the difference is more than 180 degrees, we've wrapped around
+        if diff > 180:
+            self.offset -= 360
+        elif diff < -180:
+            self.offset += 360
+            
+        # Save current angle for next comparison
+        self.previous_angle = angle
+        
+        # Return unwrapped angle
+        return angle + self.offset
+    
+    def reset(self):
+        """Reset the unwrapper"""
+        self.previous_angle = None
+        self.offset = 0
+
 # Kalman Filter implementation for 3D orientation
 class KalmanFilter3D:
     def __init__(self, process_noise=0.1, measurement_noise=1.0):
@@ -135,8 +173,9 @@ except serial.SerialException as e:
 x_data, y_data, z_data = [], [], []
 x_filtered, y_filtered, z_filtered = [], [], []
 
-# Initialize Kalman filter
+# Initialize Kalman filter and angle unwrapper
 kalman_filter = KalmanFilter3D(process_noise=0.1, measurement_noise=1.0)
+yaw_unwrapper = AngleUnwrapper()
 
 # Regular expression to parse serial data of the form: "Euler: 45.0, -30.0, 10.0"
 euler_regex = re.compile(r"Euler:\s*([\d\.-]+),\s*([\d\.-]+),\s*([\d\.-]+)")
@@ -145,6 +184,10 @@ euler_regex = re.compile(r"Euler:\s*([\d\.-]+),\s*([\d\.-]+),\s*([\d\.-]+)")
 auto_resize = True
 plot_range = 180  # Initial plot range
 show_controls = True  # Control panel visibility
+
+# Flags for optimization
+redraw_needed = False
+last_redraw_time = 0
 
 # Create main Tkinter window
 root = tk.Tk()
@@ -187,13 +230,14 @@ fig = plt.figure(figsize=(8, 6), facecolor=DARK_BG)
 ax = fig.add_subplot(111, projection='3d')
 ax.set_facecolor(DARKER_BG)
 
-# Create path lines for visualization
+# Create path lines for visualization - initialize with empty data
 line, = ax.plot([], [], [], lw=2, label='Orientation Path', color=HIGHLIGHT)
 filtered_line, = ax.plot([], [], [], lw=2, label='Filtered Path', color=SUCCESS_COLOR)
 dot = ax.plot([], [], [], marker='o', label='Current Orientation', color=ACCENT_COLOR, markersize=8)[0]
 
-# Create arrow for direction visualization
-quiver = None  # Initialize as None, will be created during first update
+# Create arrow for direction visualization - will be updated in place
+quiver = ax.quiver([0], [0], [0], [0], [0], [1], color=DANGER_COLOR, 
+                  length=QUIVER_SCALE, normalize=True, arrow_length_ratio=0.2)
 
 # Set initial axis limits
 ax.set_xlim(-plot_range, plot_range)
@@ -212,9 +256,10 @@ canvas_frame.grid(column=0, row=0, sticky=(tk.N, tk.W, tk.E, tk.S))
 canvas_frame.columnconfigure(0, weight=1)
 canvas_frame.rowconfigure(0, weight=1)
 
-canvas = FigureCanvasTkAgg(fig, master=canvas_frame)
-canvas.draw()
-canvas_widget = canvas.get_tk_widget()
+# Create the matplotlib canvas
+figure_canvas = FigureCanvasTkAgg(fig, master=canvas_frame)
+figure_canvas.draw()
+canvas_widget = figure_canvas.get_tk_widget()
 canvas_widget.grid(column=0, row=0, sticky=(tk.N, tk.W, tk.E, tk.S))
 
 # Create notebook (tabbed interface) for controls
@@ -229,12 +274,13 @@ legend_tab = ttk.Frame(notebook)
 notebook.add(controls_tab, text='Controls')
 notebook.add(legend_tab, text='Legend')
 
-# Ensure paned window initially divides space equally
+# Ensure paned window initially divides space correctly (controls take 1/3)
 def configure_paned_window(event=None):
     total_width = paned_window.winfo_width()
     if total_width > 10:  # Only adjust when there's enough width
         if show_controls:
-            paned_window.sashpos(0, total_width // 2)
+            # Set control panel to take up 1/3 of the screen
+            paned_window.sashpos(0, int(total_width * 2/3))
 
 # Bind to configure event to ensure proper sizing
 paned_window.bind("<Configure>", configure_paned_window)
@@ -256,6 +302,18 @@ def toggle_controls():
 toggle_btn = ttk.Button(plot_frame, text="Hide Controls", command=toggle_controls)
 toggle_btn.grid(column=0, row=1, sticky=tk.SE, padx=5, pady=5)
 
+# Add performance options
+performance_frame = ttk.LabelFrame(controls_tab, text="Performance", padding="10")
+performance_frame.pack(fill=tk.X, pady=10)
+
+# Redraw interval slider
+redraw_var = tk.IntVar(value=REDRAW_INTERVAL)
+ttk.Label(performance_frame, text="Redraw Interval (ms):").pack(anchor=tk.W)
+redraw_slider = ttk.Scale(performance_frame, from_=10, to=500, variable=redraw_var, orient=tk.HORIZONTAL)
+redraw_slider.pack(fill=tk.X, pady=5)
+redraw_value_label = ttk.Label(performance_frame, textvariable=redraw_var)
+redraw_value_label.pack(anchor=tk.E)
+
 # Controls tab content
 controls_tab.columnconfigure(0, weight=1)
 
@@ -269,6 +327,12 @@ auto_resize_check = ttk.Checkbutton(plot_frame_controls, text="Auto-resize plot"
                                    variable=auto_resize_var)
 auto_resize_check.pack(anchor=tk.W, pady=5)
 
+# Continuous yaw toggle
+continuous_yaw_var = tk.BooleanVar(value=True)
+continuous_yaw_check = ttk.Checkbutton(plot_frame_controls, text="Continuous yaw (prevent 0/360 jumps)", 
+                                      variable=continuous_yaw_var)
+continuous_yaw_check.pack(anchor=tk.W, pady=5)
+
 # Reset plot button
 def reset_plot():
     global x_data, y_data, z_data, x_filtered, y_filtered, z_filtered
@@ -278,8 +342,10 @@ def reset_plot():
     x_filtered.clear()
     y_filtered.clear()
     z_filtered.clear()
+    # Reset angle unwrapper
+    yaw_unwrapper.reset()
     update_plot_limits()
-    canvas.draw_idle()
+    schedule_redraw()
 
 ttk.Button(plot_frame_controls, text="Reset Plot", command=reset_plot).pack(anchor=tk.W, pady=5, fill=tk.X)
 
@@ -293,8 +359,9 @@ def zero_imu():
     ser.flush()
     print("Zeroing IMU")
     # Reset Kalman filter
-    global kalman_filter
+    global kalman_filter, yaw_unwrapper
     kalman_filter = KalmanFilter3D(process_noise=0.1, measurement_noise=1.0)
+    yaw_unwrapper.reset()
 
 ttk.Button(imu_frame, text="Zero IMU", command=zero_imu).pack(fill=tk.X, pady=5)
 
@@ -397,6 +464,9 @@ def update_plot_limits():
     ax.set_xlim(-max_range, max_range)
     ax.set_ylim(-max_range, max_range)
     ax.set_zlim(-max_range, max_range)
+    
+    # Mark for redraw
+    schedule_redraw()
 
 # Function to convert Euler angles to direction vector
 def euler_to_vector(yaw, pitch, roll):
@@ -414,11 +484,31 @@ def euler_to_vector(yaw, pitch, roll):
     
     return [x, y, z]
 
+# Throttle redraws for better performance
+def schedule_redraw():
+    global redraw_needed
+    redraw_needed = True
+
+# Actual redraw function that runs periodically
+def redraw_if_needed():
+    global redraw_needed, last_redraw_time
+    current_time = time.time() * 1000  # current time in ms
+    
+    if redraw_needed and (current_time - last_redraw_time) > redraw_var.get():
+        figure_canvas.draw()
+        redraw_needed = False
+        last_redraw_time = current_time
+    
+    # Schedule next check
+    root.after(10, redraw_if_needed)
+
 # Function to update the plot
 def update_plot():
-    global x_data, y_data, z_data, x_filtered, y_filtered, z_filtered, quiver
+    global x_data, y_data, z_data, x_filtered, y_filtered, z_filtered
     
     # Read all available data from the serial port
+    data_updated = False
+    
     while ser.in_waiting > 0:
         try:
             line_raw = ser.readline().decode('utf-8', errors='replace').strip()
@@ -429,6 +519,10 @@ def update_plot():
                 yaw = float(match.group(1))
                 pitch = float(match.group(2))
                 roll = float(match.group(3))
+                
+                # Apply angle unwrapping if enabled
+                if continuous_yaw_var.get():
+                    yaw = yaw_unwrapper.unwrap(yaw)
                 
                 # Apply Kalman filter
                 measurement = np.array([yaw, pitch, roll])
@@ -446,50 +540,22 @@ def update_plot():
                 z_filtered.append(filtered[2])
                 
                 # Update visual angle displays with filtered values
-                update_angle_display(filtered[0], filtered[1], filtered[2])
+                # For display, convert back to standard 0-360 range
+                display_yaw = filtered[0]
+                if not continuous_yaw_var.get():
+                    display_yaw = display_yaw % 360
+                update_angle_display(display_yaw, filtered[1], filtered[2])
                 
-                # Limit history to last 200 points for clarity
-                if len(x_data) > 200:
-                    x_data[:] = x_data[-200:]
-                    y_data[:] = y_data[-200:]
-                    z_data[:] = z_data[-200:]
-                    x_filtered[:] = x_filtered[-200:]
-                    y_filtered[:] = y_filtered[-200:]
-                    z_filtered[:] = z_filtered[-200:]
+                # Limit history to reduce memory and processing
+                if len(x_data) > DATA_HISTORY_LENGTH:
+                    x_data = x_data[-DATA_HISTORY_LENGTH:]
+                    y_data = y_data[-DATA_HISTORY_LENGTH:]
+                    z_data = z_data[-DATA_HISTORY_LENGTH:]
+                    x_filtered = x_filtered[-DATA_HISTORY_LENGTH:]
+                    y_filtered = y_filtered[-DATA_HISTORY_LENGTH:]
+                    z_filtered = z_filtered[-DATA_HISTORY_LENGTH:]
                 
-                # Update the plotted lines and the current position dot
-                if len(x_data) > 0:
-                    line.set_data(x_data, y_data)
-                    line.set_3d_properties(z_data)
-                    filtered_line.set_data(x_filtered, y_filtered)
-                    filtered_line.set_3d_properties(z_filtered)
-                    dot.set_data(x_filtered[-1:], y_filtered[-1:])
-                    dot.set_3d_properties(z_filtered[-1:])
-                    
-                    # Update the direction arrow
-                    if len(x_filtered) > 0:
-                        # Get current position
-                        pos = [x_filtered[-1], y_filtered[-1], z_filtered[-1]]
-                        
-                        # Calculate direction vector
-                        direction = euler_to_vector(filtered[0], filtered[1], filtered[2])
-                        
-                        # Remove previous quiver
-                        if quiver:
-                            quiver.remove()
-                        
-                        # Create new quiver
-                        quiver = ax.quiver(pos[0], pos[1], pos[2], 
-                                         direction[0], direction[1], direction[2],
-                                         color=DANGER_COLOR, length=20, normalize=True, 
-                                         arrow_length_ratio=0.2)
-                    
-                    # Update plot limits if auto-resize is enabled
-                    if len(x_data) > 1 and len(x_data) % 10 == 0:  # Only check every 10 points
-                        update_plot_limits()
-                    
-                    # Use draw instead of draw_idle
-                    canvas.draw()
+                data_updated = True
             else:
                 # Print non-matching lines for debugging
                 if line_raw and not line_raw.startswith("Euler:"):
@@ -502,11 +568,50 @@ def update_plot():
                 ser.reset_input_buffer()
                 print("Reset input buffer due to overflow")
     
+    # Update visualization if data changed
+    if data_updated and len(x_data) > 0:
+        # Update the plotted lines
+        line.set_data(x_data, y_data)
+        line.set_3d_properties(z_data)
+        filtered_line.set_data(x_filtered, y_filtered)
+        filtered_line.set_3d_properties(z_filtered)
+        
+        # Update the current position dot
+        dot.set_data([x_filtered[-1]], [y_filtered[-1]])
+        dot.set_3d_properties([z_filtered[-1]])
+        
+        # Update the direction arrow (more efficiently)
+        if len(x_filtered) > 0:
+            # Get current position
+            pos = np.array([[x_filtered[-1], y_filtered[-1], z_filtered[-1]]])
+            
+            # For direction vector, use modular angles (0-360) for correct vector calculation
+            # but keep the arrow at the unwrapped position
+            yaw_for_vector = x_filtered[-1]
+            if continuous_yaw_var.get():
+                yaw_for_vector = yaw_for_vector % 360
+            
+            # Calculate direction vector
+            direction = euler_to_vector(yaw_for_vector, y_filtered[-1], z_filtered[-1])
+            direction = np.array([[direction[0], direction[1], direction[2]]])
+            
+            # Update quiver directly without recreating
+            quiver.set_segments([np.concatenate((pos, pos + direction * QUIVER_SCALE))])
+        
+        # Update plot limits if auto-resize is enabled
+        if len(x_data) > 1 and len(x_data) % 10 == 0:  # Only check every 10 points
+            update_plot_limits()
+        
+        # Schedule a redraw (actual redraw happens in redraw_if_needed)
+        schedule_redraw()
+    
     # Schedule the next update
     root.after(10, update_plot)
 
-# Start the update process
+# Start the update and redraw processes
 root.after(10, update_plot)
+root.after(10, redraw_if_needed)
+
 # Call configure_paned_window after a delay to ensure proper initial sizing
 root.after(100, configure_paned_window)
 
