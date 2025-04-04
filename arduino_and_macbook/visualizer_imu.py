@@ -458,76 +458,206 @@ class CircularGauge(tk.Canvas):
         self.create_gauge()
         
     def create_gauge(self):
-        # Draw the gauge background (semi-circle)
+        # Calculate center and radius
         center_x = self.width // 2
-        center_y = self.height - 10
-        radius = min(center_x, center_y) - 10
+        center_y = self.height // 2
+        radius = min(center_x, center_y) - 15
         
-        # Draw the arc background
-        self.create_arc(center_x - radius, center_y - radius, 
+        # Draw the outer circle
+        self.create_oval(center_x - radius, center_y - radius,
                         center_x + radius, center_y + radius,
-                        start=0, extent=180, fill=DARKER_BG, outline=self.fg)
+                        outline=self.fg, width=2)
         
-        # Draw tick marks
-        for i in range(0, 181, 30):
-            angle_rad = math.radians(i)
-            inner_x = center_x + (radius - 10) * math.cos(angle_rad)
-            inner_y = center_y - (radius - 10) * math.sin(angle_rad)
+        # Draw tick marks and labels
+        for i in range(0, 360, 30):  # Major ticks every 30 degrees
+            angle_rad = math.radians(i - 90)  # Subtract 90 to start at top
+            
+            # Calculate tick mark positions
             outer_x = center_x + radius * math.cos(angle_rad)
-            outer_y = center_y - radius * math.sin(angle_rad)
+            outer_y = center_y + radius * math.sin(angle_rad)
             
-            self.create_line(inner_x, inner_y, outer_x, outer_y, fill=self.fg)
-            
-            # Add labels for major ticks
-            if i % 90 == 0:
+            if i % 90 == 0:  # Major ticks (0, 90, 180, 270)
+                inner_x = center_x + (radius - 15) * math.cos(angle_rad)
+                inner_y = center_y + (radius - 15) * math.sin(angle_rad)
+                self.create_line(inner_x, inner_y, outer_x, outer_y, 
+                               fill=self.fg, width=2)
+                
+                # Add labels for major ticks
                 label_x = center_x + (radius - 25) * math.cos(angle_rad)
-                label_y = center_y - (radius - 25) * math.sin(angle_rad)
-                self.create_text(label_x, label_y, text=str(i), fill=self.fg)
+                label_y = center_y + (radius - 25) * math.sin(angle_rad)
+                label_text = str(i if i != 0 else 360)  # Show 360 instead of 0
+                self.create_text(label_x, label_y, text=label_text, 
+                               fill=self.fg, font=('Helvetica', 8))
+            else:  # Minor ticks
+                inner_x = center_x + (radius - 8) * math.cos(angle_rad)
+                inner_y = center_y + (radius - 8) * math.sin(angle_rad)
+                self.create_line(inner_x, inner_y, outer_x, outer_y, 
+                               fill=self.fg)
         
         # Draw the title
-        self.create_text(center_x, 15, text=self.title, fill=self.fg)
+        self.create_text(center_x, 15, text=self.title, 
+                        fill=self.fg, font=('Helvetica', 10, 'bold'))
         
-        # Create the needle (initially at 0)
-        self.needle = self.create_line(center_x, center_y, center_x, center_y - radius + 20, 
-                                      fill=HIGHLIGHT, width=2)
+        # Create the needle with a triangular head
+        self.needle = self.create_polygon(0, 0, 0, 0, 0, 0, 
+                                        fill=HIGHLIGHT, outline=HIGHLIGHT)
         
+        # Create background for value text
+        self.value_bg = self.create_rectangle(0, 0, 0, 0, 
+                                            fill=DARKER_BG, outline=DARKER_BG)
         # Create the value text
-        self.value_text = self.create_text(center_x, center_y + 15, text="0.0°", fill=self.fg)
+        self.value_text = self.create_text(center_x, center_y + radius//2, 
+                                         text="0.0°", fill=self.fg,
+                                         font=('Helvetica', 10, 'bold'))
+        
+        # Update the value text background
+        self._update_value_background()
+    
+    def _update_value_background(self):
+        # Get text bounds
+        bbox = self.bbox(self.value_text)
+        padding = 5
+        # Update background rectangle
+        self.coords(self.value_bg,
+                   bbox[0] - padding, bbox[1] - padding,
+                   bbox[2] + padding, bbox[3] + padding)
+        # Ensure text is on top
+        self.tag_raise(self.value_text)
         
     def update_value(self, value):
-        # Clamp value to range
-        value = max(self.min_value, min(self.max_value, value))
+        # Normalize value to 0-360 range
+        value = value % 360
+        if value < 0:
+            value += 360
+            
+        # Convert to radians (subtract 90 to start at top)
+        angle_rad = math.radians(value - 90)
         
-        # Calculate angle (0-180 degrees)
-        angle = (value - self.min_value) / (self.max_value - self.min_value) * 180
-        
-        # Convert to radians
-        angle_rad = math.radians(angle)
-        
-        # Calculate needle end point
+        # Calculate center and radius
         center_x = self.width // 2
-        center_y = self.height - 10
-        radius = min(center_x, center_y) - 10
+        center_y = self.height // 2
+        radius = min(center_x, center_y) - 15
         
-        end_x = center_x + (radius - 20) * math.cos(angle_rad)
-        end_y = center_y - (radius - 20) * math.sin(angle_rad)
+        # Calculate needle points for triangle
+        length = radius - 20
+        width = 6
         
-        # Update needle position
-        self.coords(self.needle, center_x, center_y, end_x, end_y)
+        # Calculate the three points of the triangle
+        tip_x = center_x + length * math.cos(angle_rad)
+        tip_y = center_y + length * math.sin(angle_rad)
+        
+        # Calculate perpendicular angle for base points
+        perp_angle = angle_rad + math.pi/2
+        
+        base1_x = center_x + width * math.cos(perp_angle)
+        base1_y = center_y + width * math.sin(perp_angle)
+        
+        base2_x = center_x - width * math.cos(perp_angle)
+        base2_y = center_y - width * math.sin(perp_angle)
+        
+        # Update needle polygon
+        self.coords(self.needle, 
+                   base1_x, base1_y,
+                   tip_x, tip_y,
+                   base2_x, base2_y)
         
         # Update value text
         self.itemconfig(self.value_text, text=f"{value:.1f}°")
+        self._update_value_background()
 
-# Create gauges
-gauge_size = 120
-yaw_gauge = CircularGauge(gauges_container, gauge_size, gauge_size//2 + 10, title="Yaw")
+# Create XYZ Arrow visualization class
+class XYZArrows(tk.Canvas):
+    def __init__(self, parent, size=100, bg=DARK_BG, fg=TEXT_COLOR, highlightthickness=0):
+        super().__init__(parent, width=size, height=size, bg=bg, highlightthickness=highlightthickness)
+        self.size = size
+        self.center_x = size // 2
+        self.center_y = size // 2
+        self.arrow_length = size // 3
+        
+        # Create initial arrows
+        self.x_arrow = self.create_line(0, 0, 0, 0, fill='red', width=2, arrow=tk.LAST)
+        self.y_arrow = self.create_line(0, 0, 0, 0, fill='green', width=2, arrow=tk.LAST)
+        self.z_arrow = self.create_line(0, 0, 0, 0, fill='blue', width=2, arrow=tk.LAST)
+        
+        # Create labels
+        self.create_text(self.center_x + self.arrow_length + 10, self.center_y, 
+                        text="X", fill='red', font=('Helvetica', 10, 'bold'))
+        self.create_text(self.center_x, self.center_y - self.arrow_length - 10, 
+                        text="Y", fill='green', font=('Helvetica', 10, 'bold'))
+        self.create_text(self.center_x + 10, self.center_y + 10, 
+                        text="Z", fill='blue', font=('Helvetica', 10, 'bold'))
+        
+        self.update_arrows(0, 0, 0)
+        
+    def update_arrows(self, yaw, pitch, roll):
+        """Update arrow positions based on IMU orientation"""
+        # Convert angles to radians
+        yaw_rad = math.radians(yaw)
+        pitch_rad = math.radians(pitch)
+        roll_rad = math.radians(roll)
+        
+        # Create rotation matrices
+        def rot_z(angle):  # yaw
+            c = math.cos(angle)
+            s = math.sin(angle)
+            return np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])
+            
+        def rot_y(angle):  # pitch
+            c = math.cos(angle)
+            s = math.sin(angle)
+            return np.array([[c, 0, s], [0, 1, 0], [-s, 0, c]])
+            
+        def rot_x(angle):  # roll
+            c = math.cos(angle)
+            s = math.sin(angle)
+            return np.array([[1, 0, 0], [0, c, -s], [0, s, c]])
+        
+        # Combined rotation matrix
+        R = rot_z(yaw_rad) @ rot_y(pitch_rad) @ rot_x(roll_rad)
+        
+        # Base vectors
+        x_base = np.array([1, 0, 0]) * self.arrow_length
+        y_base = np.array([0, 1, 0]) * self.arrow_length
+        z_base = np.array([0, 0, 1]) * self.arrow_length
+        
+        # Rotate vectors
+        x_rot = R @ x_base
+        y_rot = R @ y_base
+        z_rot = R @ z_base
+        
+        # Update arrows (project 3D to 2D)
+        # X arrow (red)
+        self.coords(self.x_arrow,
+                   self.center_x, self.center_y,
+                   self.center_x + x_rot[0], self.center_y - x_rot[1])
+        
+        # Y arrow (green)
+        self.coords(self.y_arrow,
+                   self.center_x, self.center_y,
+                   self.center_x + y_rot[0], self.center_y - y_rot[1])
+        
+        # Z arrow (blue)
+        self.coords(self.z_arrow,
+                   self.center_x, self.center_y,
+                   self.center_x + z_rot[0], self.center_y - z_rot[1])
+
+# Create gauges with larger size
+gauge_size = 150
+yaw_gauge = CircularGauge(gauges_container, gauge_size, gauge_size, title="Yaw")
 yaw_gauge.pack(side=tk.LEFT, padx=10, expand=True)
 
-pitch_gauge = CircularGauge(gauges_container, gauge_size, gauge_size//2 + 10, title="Pitch")
+pitch_gauge = CircularGauge(gauges_container, gauge_size, gauge_size, title="Pitch")
 pitch_gauge.pack(side=tk.LEFT, padx=10, expand=True)
 
-roll_gauge = CircularGauge(gauges_container, gauge_size, gauge_size//2 + 10, title="Roll")
+roll_gauge = CircularGauge(gauges_container, gauge_size, gauge_size, title="Roll")
 roll_gauge.pack(side=tk.LEFT, padx=10, expand=True)
+
+# Create XYZ arrows visualization
+arrows_frame = ttk.LabelFrame(legend_frame, text="IMU Orientation", padding="10")
+arrows_frame.pack(fill=tk.X, pady=10)
+
+xyz_arrows = XYZArrows(arrows_frame, size=150)
+xyz_arrows.pack(pady=10)
 
 # Update angle display function
 def update_angle_display(yaw, pitch, roll):
@@ -547,6 +677,9 @@ def update_angle_display(yaw, pitch, roll):
     yaw_gauge.update_value(yaw)
     pitch_gauge.update_value(pitch)
     roll_gauge.update_value(roll)
+    
+    # Update XYZ arrows
+    xyz_arrows.update_arrows(yaw, pitch, roll)
 
 # Function to update plot limits based on data
 def update_plot_limits():
