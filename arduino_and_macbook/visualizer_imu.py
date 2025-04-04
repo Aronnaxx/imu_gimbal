@@ -457,135 +457,8 @@ roll_progress = ttk.Progressbar(angle_display, orient=tk.HORIZONTAL, mode='deter
 roll_progress.grid(row=2, column=1, sticky=(tk.W, tk.E), padx=8, pady=4)
 ttk.Label(angle_display, textvariable=roll_var, font=('Helvetica', 10, 'bold')).grid(row=2, column=2, sticky=tk.E, pady=4)
 
-# Create a separator between angle bars and gauges
+# Create a separator between angle bars and IMU visualization
 ttk.Separator(readouts_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=15)
-
-# Create circular gauges frame
-gauges_frame = ttk.LabelFrame(readouts_frame, text="Circular Gauges", padding="10")
-gauges_frame.pack(fill=tk.X, pady=10)
-
-# Create a frame for the gauges that will resize properly
-gauges_container = ttk.Frame(gauges_frame)
-gauges_container.pack(fill=tk.X, pady=10)
-gauges_container.columnconfigure(0, weight=1)
-gauges_container.columnconfigure(1, weight=1)
-gauges_container.columnconfigure(2, weight=1)
-
-# Create circular gauge class
-class CircularGauge(tk.Canvas):
-    def __init__(self, parent, width, height, min_value=-180, max_value=180, 
-                 title="", bg=DARK_BG, fg=TEXT_COLOR, highlightthickness=0):
-        super().__init__(parent, width=width, height=height, bg=bg, highlightthickness=highlightthickness)
-        self.width = width
-        self.height = height
-        self.min_value = min_value
-        self.max_value = max_value
-        self.title = title
-        self.fg = fg
-        
-        # Create the gauge
-        self.create_gauge()
-        
-    def create_gauge(self):
-        # Calculate center and radius
-        center_x = self.width // 2
-        center_y = self.height // 2
-        radius = min(center_x, center_y) - 15
-        
-        # Draw the outer circle
-        self.create_oval(center_x - radius, center_y - radius,
-                        center_x + radius, center_y + radius,
-                        outline=self.fg, width=2)
-        
-        # Draw tick marks and labels
-        for i in range(0, 360, 30):  # Major ticks every 30 degrees
-            angle_rad = math.radians(i - 90)  # Subtract 90 to start at top
-            
-            # Calculate tick mark positions
-            outer_x = center_x + radius * math.cos(angle_rad)
-            outer_y = center_y + radius * math.sin(angle_rad)
-            
-            if i % 90 == 0:  # Major ticks (0, 90, 180, 270)
-                inner_x = center_x + (radius - 15) * math.cos(angle_rad)
-                inner_y = center_y + (radius - 15) * math.sin(angle_rad)
-                self.create_line(inner_x, inner_y, outer_x, outer_y, 
-                               fill=self.fg, width=2)
-                
-                # Add labels for major ticks with larger font
-                label_x = center_x + (radius - 28) * math.cos(angle_rad)
-                label_y = center_y + (radius - 28) * math.sin(angle_rad)
-                label_text = str(i if i != 0 else 360)  # Show 360 instead of 0
-                self.create_text(label_x, label_y, text=label_text, 
-                               fill=self.fg, font=('Helvetica', 10, 'bold'))
-            else:  # Minor ticks
-                inner_x = center_x + (radius - 8) * math.cos(angle_rad)
-                inner_y = center_y + (radius - 8) * math.sin(angle_rad)
-                self.create_line(inner_x, inner_y, outer_x, outer_y, 
-                               fill=self.fg)
-        
-        # Draw the title
-        self.create_text(center_x, 15, text=self.title, 
-                        fill=self.fg, font=('Helvetica', 12, 'bold'))
-        
-        # Create the needle with a triangular head
-        self.needle = self.create_polygon(0, 0, 0, 0, 0, 0, 
-                                        fill=HIGHLIGHT, outline=HIGHLIGHT)
-        
-        # Create more prominent value display at bottom
-        # Background rectangle with outline
-        value_bg_y = center_y + radius + 15
-        self.value_box = self.create_rectangle(
-            center_x - 40, value_bg_y - 12,
-            center_x + 40, value_bg_y + 12,
-            fill=DARKER_BG, outline=HIGHLIGHT, width=2
-        )
-        
-        # Create the value text with larger font
-        self.value_text = self.create_text(
-            center_x, value_bg_y,
-            text="0.0°", fill="#FFFFFF",
-            font=('Helvetica', 12, 'bold')
-        )
-        
-    def update_value(self, value):
-        # Normalize value to 0-360 range
-        value = value % 360
-        if value < 0:
-            value += 360
-            
-        # Convert to radians (subtract 90 to start at top)
-        angle_rad = math.radians(value - 90)
-        
-        # Calculate center and radius
-        center_x = self.width // 2
-        center_y = self.height // 2
-        radius = min(center_x, center_y) - 15
-        
-        # Calculate needle points for triangle
-        length = radius - 20
-        width = 8  # Slightly wider needle
-        
-        # Calculate the three points of the triangle
-        tip_x = center_x + length * math.cos(angle_rad)
-        tip_y = center_y + length * math.sin(angle_rad)
-        
-        # Calculate perpendicular angle for base points
-        perp_angle = angle_rad + math.pi/2
-        
-        base1_x = center_x + width * math.cos(perp_angle)
-        base1_y = center_y + width * math.sin(perp_angle)
-        
-        base2_x = center_x - width * math.cos(perp_angle)
-        base2_y = center_y - width * math.sin(perp_angle)
-        
-        # Update needle polygon
-        self.coords(self.needle, 
-                   base1_x, base1_y,
-                   tip_x, tip_y,
-                   base2_x, base2_y)
-        
-        # Update value text
-        self.itemconfig(self.value_text, text=f"{value:.1f}°")
 
 # Create XYZ Arrow visualization class
 class XYZArrows(tk.Canvas):
@@ -682,32 +555,21 @@ class XYZArrows(tk.Canvas):
                    self.center_x, self.center_y,
                    self.center_x + z_rot[0], self.center_y - z_rot[1])
 
-# Create gauges with smaller size
-gauge_size = 150
-yaw_gauge = CircularGauge(gauges_container, gauge_size, gauge_size, title="Yaw")
-yaw_gauge.grid(row=0, column=0, padx=5)
-
-pitch_gauge = CircularGauge(gauges_container, gauge_size, gauge_size, title="Pitch")
-pitch_gauge.grid(row=0, column=1, padx=5)
-
-roll_gauge = CircularGauge(gauges_container, gauge_size, gauge_size, title="Roll")
-roll_gauge.grid(row=0, column=2, padx=5)
-
 # Create XYZ arrows visualization with flexible resizing
 arrows_frame = ttk.LabelFrame(readouts_frame, text="IMU Orientation", padding="10")
-arrows_frame.pack(fill=tk.X, pady=10)
+arrows_frame.pack(fill=tk.X, pady=10, expand=True)
 arrows_frame.columnconfigure(0, weight=1)
 arrows_frame.rowconfigure(0, weight=1)
 
 arrows_container = ttk.Frame(arrows_frame)
-arrows_container.pack(fill=tk.BOTH, expand=True, pady=10)
+arrows_container.pack(fill=tk.BOTH, expand=True, pady=5)
 arrows_container.columnconfigure(0, weight=1)
 arrows_container.rowconfigure(0, weight=1)
 
-xyz_arrows = XYZArrows(arrows_container, size=200)
-xyz_arrows.pack(pady=10)
+xyz_arrows = XYZArrows(arrows_container, size=220)
+xyz_arrows.pack(pady=10, expand=True)
 
-# Update angle display function
+# Update angle display function without gauge references
 def update_angle_display(yaw, pitch, roll):
     """Update the angle display with current values"""
     # Update variables
@@ -720,11 +582,6 @@ def update_angle_display(yaw, pitch, roll):
     yaw_progress['value'] = (yaw + 90) % 180
     pitch_progress['value'] = (pitch + 90) % 180
     roll_progress['value'] = (roll + 90) % 180
-    
-    # Update circular gauges
-    yaw_gauge.update_value(yaw)
-    pitch_gauge.update_value(pitch)
-    roll_gauge.update_value(roll)
     
     # Update XYZ arrows
     xyz_arrows.update_arrows(yaw, pitch, roll)
