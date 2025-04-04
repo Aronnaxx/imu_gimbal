@@ -412,24 +412,30 @@ angle_display = ttk.Frame(angle_display_frame)
 angle_display.pack(fill=tk.X, pady=5)
 angle_display.columnconfigure(1, weight=1)
 
+# Create colored progress bar style for each angle
+style = ttk.Style()
+style.configure("Yaw.Horizontal.TProgressbar", background=HIGHLIGHT)
+style.configure("Pitch.Horizontal.TProgressbar", background=SUCCESS_COLOR)
+style.configure("Roll.Horizontal.TProgressbar", background=ACCENT_COLOR)
+
 # Yaw display
 ttk.Label(angle_display, text="Yaw:", font=('Helvetica', 10, 'bold')).grid(row=0, column=0, sticky=tk.W, pady=4)
 yaw_progress = ttk.Progressbar(angle_display, orient=tk.HORIZONTAL, mode='determinate',
-                              maximum=180, value=90)
+                              maximum=180, value=90, style="Yaw.Horizontal.TProgressbar")
 yaw_progress.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=8, pady=4)
 ttk.Label(angle_display, textvariable=yaw_var, font=('Helvetica', 10, 'bold')).grid(row=0, column=2, sticky=tk.E, pady=4)
 
 # Pitch display
 ttk.Label(angle_display, text="Pitch:", font=('Helvetica', 10, 'bold')).grid(row=1, column=0, sticky=tk.W, pady=4)
 pitch_progress = ttk.Progressbar(angle_display, orient=tk.HORIZONTAL, mode='determinate',
-                               maximum=180, value=90)
+                               maximum=180, value=90, style="Pitch.Horizontal.TProgressbar")
 pitch_progress.grid(row=1, column=1, sticky=(tk.W, tk.E), padx=8, pady=4)
 ttk.Label(angle_display, textvariable=pitch_var, font=('Helvetica', 10, 'bold')).grid(row=1, column=2, sticky=tk.E, pady=4)
 
 # Roll display
 ttk.Label(angle_display, text="Roll:", font=('Helvetica', 10, 'bold')).grid(row=2, column=0, sticky=tk.W, pady=4)
 roll_progress = ttk.Progressbar(angle_display, orient=tk.HORIZONTAL, mode='determinate',
-                              maximum=180, value=90)
+                              maximum=180, value=90, style="Roll.Horizontal.TProgressbar")
 roll_progress.grid(row=2, column=1, sticky=(tk.W, tk.E), padx=8, pady=4)
 ttk.Label(angle_display, textvariable=roll_var, font=('Helvetica', 10, 'bold')).grid(row=2, column=2, sticky=tk.E, pady=4)
 
@@ -440,9 +446,12 @@ ttk.Separator(legend_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=15)
 gauges_frame = ttk.LabelFrame(legend_frame, text="Circular Gauges", padding="10")
 gauges_frame.pack(fill=tk.X, pady=10)
 
-# Create a frame for the gauges
+# Create a frame for the gauges that will resize properly
 gauges_container = ttk.Frame(gauges_frame)
 gauges_container.pack(fill=tk.X, pady=10)
+gauges_container.columnconfigure(0, weight=1)
+gauges_container.columnconfigure(1, weight=1)
+gauges_container.columnconfigure(2, weight=1)
 
 # Create circular gauge class
 class CircularGauge(tk.Canvas):
@@ -504,27 +513,21 @@ class CircularGauge(tk.Canvas):
         self.needle = self.create_polygon(0, 0, 0, 0, 0, 0, 
                                         fill=HIGHLIGHT, outline=HIGHLIGHT)
         
-        # Create background for value text with larger size
-        self.value_bg = self.create_rectangle(0, 0, 0, 0, 
-                                            fill=DARKER_BG, outline=HIGHLIGHT)
-        # Create the value text with larger font
-        self.value_text = self.create_text(center_x, center_y + radius//2, 
-                                         text="0.0°", fill=TEXT_COLOR,
-                                         font=('Helvetica', 12, 'bold'))
+        # Create more prominent value display at bottom
+        # Background rectangle with outline
+        value_bg_y = center_y + radius + 15
+        self.value_box = self.create_rectangle(
+            center_x - 40, value_bg_y - 12,
+            center_x + 40, value_bg_y + 12,
+            fill=DARKER_BG, outline=HIGHLIGHT, width=2
+        )
         
-        # Update the value text background
-        self._update_value_background()
-    
-    def _update_value_background(self):
-        # Get text bounds
-        bbox = self.bbox(self.value_text)
-        padding = 8
-        # Update background rectangle
-        self.coords(self.value_bg,
-                   bbox[0] - padding, bbox[1] - padding,
-                   bbox[2] + padding, bbox[3] + padding)
-        # Ensure text is on top
-        self.tag_raise(self.value_text)
+        # Create the value text with larger font
+        self.value_text = self.create_text(
+            center_x, value_bg_y,
+            text="0.0°", fill="#FFFFFF",
+            font=('Helvetica', 12, 'bold')
+        )
         
     def update_value(self, value):
         # Normalize value to 0-360 range
@@ -565,7 +568,6 @@ class CircularGauge(tk.Canvas):
         
         # Update value text
         self.itemconfig(self.value_text, text=f"{value:.1f}°")
-        self._update_value_background()
 
 # Create XYZ Arrow visualization class
 class XYZArrows(tk.Canvas):
@@ -576,18 +578,37 @@ class XYZArrows(tk.Canvas):
         self.center_y = size // 2
         self.arrow_length = size // 3
         
+        # Create background circle for better visibility
+        self.create_oval(
+            self.center_x - self.arrow_length - 15,
+            self.center_y - self.arrow_length - 15,
+            self.center_x + self.arrow_length + 15,
+            self.center_y + self.arrow_length + 15,
+            fill=DARKER_BG, outline=TEXT_COLOR, width=1
+        )
+        
         # Create initial arrows
-        self.x_arrow = self.create_line(0, 0, 0, 0, fill='red', width=3, arrow=tk.LAST)
-        self.y_arrow = self.create_line(0, 0, 0, 0, fill='green', width=3, arrow=tk.LAST)
-        self.z_arrow = self.create_line(0, 0, 0, 0, fill='blue', width=3, arrow=tk.LAST)
+        self.x_arrow = self.create_line(0, 0, 0, 0, fill='red', width=4, arrow=tk.LAST)
+        self.y_arrow = self.create_line(0, 0, 0, 0, fill='green', width=4, arrow=tk.LAST)
+        self.z_arrow = self.create_line(0, 0, 0, 0, fill='blue', width=4, arrow=tk.LAST)
         
         # Create labels with larger, bold font
         self.create_text(self.center_x + self.arrow_length + 12, self.center_y, 
-                        text="X", fill='red', font=('Helvetica', 12, 'bold'))
+                        text="X", fill='red', font=('Helvetica', 14, 'bold'))
         self.create_text(self.center_x, self.center_y - self.arrow_length - 12, 
-                        text="Y", fill='green', font=('Helvetica', 12, 'bold'))
+                        text="Y", fill='green', font=('Helvetica', 14, 'bold'))
         self.create_text(self.center_x + 12, self.center_y + 12, 
-                        text="Z", fill='blue', font=('Helvetica', 12, 'bold'))
+                        text="Z", fill='blue', font=('Helvetica', 14, 'bold'))
+        
+        # Create a small legend in the corner
+        legend_x = 15
+        legend_y = size - 60
+        self.create_text(legend_x, legend_y, text="X: Roll", fill='red', 
+                        font=('Helvetica', 10, 'bold'), anchor=tk.W)
+        self.create_text(legend_x, legend_y + 15, text="Y: Pitch", fill='green', 
+                        font=('Helvetica', 10, 'bold'), anchor=tk.W)
+        self.create_text(legend_x, legend_y + 30, text="Z: Yaw", fill='blue', 
+                        font=('Helvetica', 10, 'bold'), anchor=tk.W)
         
         self.update_arrows(0, 0, 0)
         
@@ -643,23 +664,30 @@ class XYZArrows(tk.Canvas):
                    self.center_x, self.center_y,
                    self.center_x + z_rot[0], self.center_y - z_rot[1])
 
-# Create gauges with larger size
-gauge_size = 180
+# Create gauges with smaller size
+gauge_size = 150
 yaw_gauge = CircularGauge(gauges_container, gauge_size, gauge_size, title="Yaw")
-yaw_gauge.pack(side=tk.LEFT, padx=10, expand=True)
+yaw_gauge.grid(row=0, column=0, padx=5)
 
 pitch_gauge = CircularGauge(gauges_container, gauge_size, gauge_size, title="Pitch")
-pitch_gauge.pack(side=tk.LEFT, padx=10, expand=True)
+pitch_gauge.grid(row=0, column=1, padx=5)
 
 roll_gauge = CircularGauge(gauges_container, gauge_size, gauge_size, title="Roll")
-roll_gauge.pack(side=tk.LEFT, padx=10, expand=True)
+roll_gauge.grid(row=0, column=2, padx=5)
 
-# Create XYZ arrows visualization
+# Create XYZ arrows visualization with flexible resizing
 arrows_frame = ttk.LabelFrame(legend_frame, text="IMU Orientation", padding="10")
 arrows_frame.pack(fill=tk.X, pady=10)
+arrows_frame.columnconfigure(0, weight=1)
+arrows_frame.rowconfigure(0, weight=1)
 
-xyz_arrows = XYZArrows(arrows_frame, size=180)
-xyz_arrows.pack(pady=15)
+arrows_container = ttk.Frame(arrows_frame)
+arrows_container.pack(fill=tk.BOTH, expand=True, pady=10)
+arrows_container.columnconfigure(0, weight=1)
+arrows_container.rowconfigure(0, weight=1)
+
+xyz_arrows = XYZArrows(arrows_container, size=200)
+xyz_arrows.pack(pady=10)
 
 # Update angle display function
 def update_angle_display(yaw, pitch, roll):
