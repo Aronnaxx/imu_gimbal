@@ -204,11 +204,53 @@ setup_styles()
 main_frame = ttk.Frame(root)
 main_frame.grid(column=0, row=0, sticky=(tk.N, tk.W, tk.E, tk.S), padx=10, pady=10)
 main_frame.columnconfigure(0, weight=1)
-main_frame.rowconfigure(0, weight=1)
+main_frame.rowconfigure(0, weight=0)  # Title bar row
+main_frame.rowconfigure(1, weight=1)  # Content row
 
-# Create paned window for resizable panels
+# Create a title bar with legend
+title_bar = ttk.Frame(main_frame, padding="5")
+title_bar.grid(column=0, row=0, sticky=(tk.W, tk.E), pady=(0, 10))
+title_bar.columnconfigure(0, weight=1)
+
+# Add title and legend to title bar
+title_frame = ttk.Frame(title_bar)
+title_frame.pack(fill=tk.X, expand=True)
+
+# App title on the left
+ttk.Label(title_frame, text="IMU Orientation Visualizer", 
+         font=('Helvetica', 14, 'bold')).pack(side=tk.LEFT, padx=5)
+
+# Legend items on the right
+legend_items = [
+    {"label": "Orientation Path", "color": HIGHLIGHT},
+    {"label": "Filtered Path", "color": SUCCESS_COLOR},
+    {"label": "Current Position", "color": ACCENT_COLOR},
+    {"label": "Direction Arrow", "color": DANGER_COLOR}
+]
+
+# Create a frame for legend items
+legend_frame_top = ttk.Frame(title_frame)
+legend_frame_top.pack(side=tk.RIGHT, padx=5)
+
+# Add legend items horizontally
+for i, item in enumerate(legend_items):
+    frame = ttk.Frame(legend_frame_top)
+    frame.pack(side=tk.LEFT, padx=10)
+    
+    # Color box
+    canvas = tk.Canvas(frame, width=16, height=16, bg=DARK_BG, highlightthickness=0)
+    canvas.create_rectangle(2, 2, 14, 14, fill=item["color"], outline="")
+    canvas.pack(side=tk.LEFT, padx=2)
+    
+    # Label
+    ttk.Label(frame, text=item["label"], font=('Helvetica', 9)).pack(side=tk.LEFT, padx=2)
+
+# Add separator below title bar
+ttk.Separator(main_frame, orient=tk.HORIZONTAL).grid(column=0, row=0, sticky=(tk.W, tk.E), pady=(35, 0))
+
+# Create paned window for resizable panels in the content area
 paned_window = ttk.PanedWindow(main_frame, orient=tk.HORIZONTAL)
-paned_window.grid(column=0, row=0, sticky=(tk.N, tk.W, tk.E, tk.S))
+paned_window.grid(column=0, row=1, sticky=(tk.N, tk.W, tk.E, tk.S))
 
 # Left panel for plot
 plot_frame = ttk.Frame(paned_window)
@@ -267,12 +309,12 @@ notebook.grid(column=0, row=0, sticky=(tk.N, tk.W, tk.E, tk.S), padx=5, pady=5)
 notebook.columnconfigure(0, weight=1)
 notebook.rowconfigure(0, weight=1)
 
-# Create tabs
+# Create tabs - rename Legend tab to Readouts since it's focused on data display now
 controls_tab = ttk.Frame(notebook)
-legend_tab = ttk.Frame(notebook)
-notebook.add(legend_tab, text='Legend')
+readouts_tab = ttk.Frame(notebook)
+notebook.add(readouts_tab, text='Readouts')
 notebook.add(controls_tab, text='Controls')
-# Select Legend tab by default
+# Select Readouts tab by default
 notebook.select(0)
 
 # Ensure paned window initially divides space correctly (controls take 1/3)
@@ -375,36 +417,12 @@ yaw_var = tk.DoubleVar(value=0.0)
 pitch_var = tk.DoubleVar(value=0.0)
 roll_var = tk.DoubleVar(value=0.0)
 
-# Custom legend in the Legend tab
-legend_frame = ttk.Frame(legend_tab, padding=10)
-legend_frame.pack(fill=tk.BOTH, expand=True)
+# Custom legend in the Legend tab (removed since moved to title bar)
+readouts_frame = ttk.Frame(readouts_tab, padding=10)
+readouts_frame.pack(fill=tk.BOTH, expand=True)
 
-# Create custom legend items
-legend_items = [
-    {"label": "Orientation Path", "color": HIGHLIGHT},
-    {"label": "Filtered Path", "color": SUCCESS_COLOR},
-    {"label": "Current Position", "color": ACCENT_COLOR},
-    {"label": "Direction Arrow", "color": DANGER_COLOR}
-]
-
-# Add legend items to legend tab
-for i, item in enumerate(legend_items):
-    frame = ttk.Frame(legend_frame)
-    frame.pack(anchor=tk.W, pady=5, fill=tk.X)
-    
-    # Color box
-    canvas = tk.Canvas(frame, width=20, height=20, bg=DARK_BG, highlightthickness=0)
-    canvas.create_rectangle(2, 2, 18, 18, fill=item["color"], outline="")
-    canvas.pack(side=tk.LEFT, padx=5)
-    
-    # Label with larger font
-    ttk.Label(frame, text=item["label"], font=('Helvetica', 10)).pack(side=tk.LEFT, padx=5)
-
-# Create a separator between legend and angle displays
-ttk.Separator(legend_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=15)
-
-# Create angle displays frame in the legend tab
-angle_display_frame = ttk.LabelFrame(legend_frame, text="Angle Displays", padding="10")
+# Create angle displays frame in the readouts tab
+angle_display_frame = ttk.LabelFrame(readouts_frame, text="Angle Displays", padding="10")
 angle_display_frame.pack(fill=tk.X, pady=10)
 
 # Create better angle displays
@@ -440,10 +458,10 @@ roll_progress.grid(row=2, column=1, sticky=(tk.W, tk.E), padx=8, pady=4)
 ttk.Label(angle_display, textvariable=roll_var, font=('Helvetica', 10, 'bold')).grid(row=2, column=2, sticky=tk.E, pady=4)
 
 # Create a separator between angle bars and gauges
-ttk.Separator(legend_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=15)
+ttk.Separator(readouts_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=15)
 
 # Create circular gauges frame
-gauges_frame = ttk.LabelFrame(legend_frame, text="Circular Gauges", padding="10")
+gauges_frame = ttk.LabelFrame(readouts_frame, text="Circular Gauges", padding="10")
 gauges_frame.pack(fill=tk.X, pady=10)
 
 # Create a frame for the gauges that will resize properly
@@ -676,7 +694,7 @@ roll_gauge = CircularGauge(gauges_container, gauge_size, gauge_size, title="Roll
 roll_gauge.grid(row=0, column=2, padx=5)
 
 # Create XYZ arrows visualization with flexible resizing
-arrows_frame = ttk.LabelFrame(legend_frame, text="IMU Orientation", padding="10")
+arrows_frame = ttk.LabelFrame(readouts_frame, text="IMU Orientation", padding="10")
 arrows_frame.pack(fill=tk.X, pady=10)
 arrows_frame.columnconfigure(0, weight=1)
 arrows_frame.rowconfigure(0, weight=1)
