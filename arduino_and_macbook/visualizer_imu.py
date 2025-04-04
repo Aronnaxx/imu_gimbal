@@ -243,7 +243,6 @@ quiver = ax.quiver([0], [0], [0], [0], [0], [1], color=DANGER_COLOR,
 ax.set_xlim(-plot_range, plot_range)
 ax.set_ylim(-plot_range, plot_range)
 ax.set_zlim(-plot_range, plot_range)
-ax.set_title("3D Orientation Trace (Yaw, Pitch, Roll)", color=TEXT_COLOR, fontsize=14)
 ax.set_xlabel("Yaw", color=TEXT_COLOR)
 ax.set_ylabel("Pitch", color=TEXT_COLOR)
 ax.set_zlabel("Roll", color=TEXT_COLOR)
