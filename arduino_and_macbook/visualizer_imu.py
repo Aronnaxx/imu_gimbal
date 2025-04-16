@@ -15,7 +15,7 @@ import math
 import colorsys
 
 # Performance settings
-REDRAW_INTERVAL = 100  # ms between redraws (higher = less CPU usage but less smooth)
+REDRAW_INTERVAL = 10  # ms between redraws (higher = less CPU usage but less smooth)
 DATA_HISTORY_LENGTH = 200  # Reduce history length to improve performance
 QUIVER_SCALE = 30  # Scale of the direction arrow
 
@@ -317,6 +317,10 @@ notebook.add(controls_tab, text='Controls')
 # Select Readouts tab by default
 notebook.select(0)
 
+# Make the controls tab expand properly
+controls_tab.columnconfigure(0, weight=1)
+controls_tab.rowconfigure(0, weight=1)
+
 # Ensure paned window initially divides space correctly (controls take 1/3)
 def configure_paned_window(event=None):
     total_width = paned_window.winfo_width()
@@ -324,6 +328,12 @@ def configure_paned_window(event=None):
         if show_controls:
             # Set control panel to take up 1/3 of the screen
             paned_window.sashpos(0, int(total_width * 2/3))
+            
+            # Force update of the readouts tab to ensure proper sizing
+            readouts_frame.update_idletasks()
+            # Update the XYZ arrows visualization
+            if hasattr(xyz_arrows, '_last_yaw'):
+                xyz_arrows.update_arrows(xyz_arrows._last_yaw, xyz_arrows._last_pitch, xyz_arrows._last_roll)
 
 # Bind to configure event to ensure proper sizing
 paned_window.bind("<Configure>", configure_paned_window)
@@ -348,6 +358,7 @@ toggle_btn.grid(column=0, row=1, sticky=tk.SE, padx=5, pady=5)
 # Add performance options
 performance_frame = ttk.LabelFrame(controls_tab, text="Performance", padding="10")
 performance_frame.pack(fill=tk.X, pady=10)
+performance_frame.columnconfigure(0, weight=1)
 
 # Redraw interval slider
 redraw_var = tk.IntVar(value=REDRAW_INTERVAL)
@@ -363,6 +374,7 @@ controls_tab.columnconfigure(0, weight=1)
 # Plot control frame
 plot_frame_controls = ttk.LabelFrame(controls_tab, text="Plot Controls", padding="10")
 plot_frame_controls.pack(fill=tk.X, pady=10)
+plot_frame_controls.columnconfigure(0, weight=1)
 
 # Auto-resize toggle with better styling
 auto_resize_var = tk.BooleanVar(value=auto_resize)
@@ -395,6 +407,7 @@ ttk.Button(plot_frame_controls, text="Reset Plot", command=reset_plot).pack(anch
 # IMU control frame
 imu_frame = ttk.LabelFrame(controls_tab, text="IMU Controls", padding="10")
 imu_frame.pack(fill=tk.X, pady=10)
+imu_frame.columnconfigure(0, weight=1)
 
 # Zero IMU button with better styling
 def zero_imu():
@@ -411,6 +424,7 @@ ttk.Button(imu_frame, text="Zero IMU", command=zero_imu).pack(fill=tk.X, pady=5)
 # Status frame with better visualization
 status_frame = ttk.LabelFrame(controls_tab, text="Status", padding="10")
 status_frame.pack(fill=tk.X, pady=10)
+status_frame.columnconfigure(0, weight=1)
 
 # Variables for each angle
 yaw_var = tk.DoubleVar(value=0.0)
@@ -420,14 +434,17 @@ roll_var = tk.DoubleVar(value=0.0)
 # Custom legend in the Legend tab (removed since moved to title bar)
 readouts_frame = ttk.Frame(readouts_tab, padding=10)
 readouts_frame.pack(fill=tk.BOTH, expand=True)
+readouts_frame.columnconfigure(0, weight=1)
+readouts_frame.rowconfigure(0, weight=1)
 
 # Create angle displays frame in the readouts tab
 angle_display_frame = ttk.LabelFrame(readouts_frame, text="Angle Displays", padding="10")
 angle_display_frame.pack(fill=tk.X, pady=10)
+angle_display_frame.columnconfigure(0, weight=1)
 
 # Create better angle displays
 angle_display = ttk.Frame(angle_display_frame)
-angle_display.pack(fill=tk.X, pady=5)
+angle_display.pack(fill=tk.X, pady=5, expand=True)
 angle_display.columnconfigure(1, weight=1)
 
 # Create colored progress bar style for each angle
@@ -463,11 +480,27 @@ ttk.Separator(readouts_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=15)
 # Create XYZ Arrow visualization class
 class XYZArrows(tk.Canvas):
     def __init__(self, parent, size=100, bg=DARK_BG, fg=TEXT_COLOR, highlightthickness=0):
-        super().__init__(parent, width=size, height=size, bg=bg, highlightthickness=highlightthickness)
-        self.size = size
-        self.center_x = size // 2
-        self.center_y = size // 2
-        self.arrow_length = size // 3
+        # Calculate size based on parent dimensions for better high-res display support
+        parent_width = parent.winfo_width()
+        parent_height = parent.winfo_height()
+        
+        # For high-res displays, use a larger minimum size
+        # This ensures the widget is visible on 4K displays
+        min_size = 300  # Minimum size for high-res displays
+        
+        # Use the larger of the calculated size or minimum size
+        self.size = max(size, min_size)
+        
+        # If parent has valid dimensions, use them to calculate a better size
+        if parent_width > 10 and parent_height > 10:
+            # Use 80% of the smaller dimension, but not less than min_size
+            self.size = max(min(parent_width, parent_height) * 0.8, min_size)
+        
+        super().__init__(parent, width=self.size, height=self.size, bg=bg, highlightthickness=highlightthickness)
+        
+        self.center_x = self.size // 2
+        self.center_y = self.size // 2
+        self.arrow_length = self.size // 3
         
         # Create background circle for better visibility
         self.create_oval(
@@ -483,28 +516,90 @@ class XYZArrows(tk.Canvas):
         self.y_arrow = self.create_line(0, 0, 0, 0, fill='green', width=4, arrow=tk.LAST)
         self.z_arrow = self.create_line(0, 0, 0, 0, fill='blue', width=4, arrow=tk.LAST)
         
-        # Create labels with larger, bold font
+        # Create labels with larger, bold font - scale font size with widget size
+        font_size = max(14, int(self.size / 15))  # Scale font size with widget size
         self.create_text(self.center_x + self.arrow_length + 12, self.center_y, 
-                        text="X", fill='red', font=('Helvetica', 14, 'bold'))
+                        text="X", fill='red', font=('Helvetica', font_size, 'bold'))
         self.create_text(self.center_x, self.center_y - self.arrow_length - 12, 
-                        text="Y", fill='green', font=('Helvetica', 14, 'bold'))
+                        text="Y", fill='green', font=('Helvetica', font_size, 'bold'))
         self.create_text(self.center_x + 12, self.center_y + 12, 
-                        text="Z", fill='blue', font=('Helvetica', 14, 'bold'))
+                        text="Z", fill='blue', font=('Helvetica', font_size, 'bold'))
         
         # Create a small legend in the corner
         legend_x = 15
-        legend_y = size - 60
+        legend_y = self.size - 60
+        legend_font_size = max(10, int(self.size / 22))  # Scale legend font size
         self.create_text(legend_x, legend_y, text="X: Roll", fill='red', 
-                        font=('Helvetica', 10, 'bold'), anchor=tk.W)
+                        font=('Helvetica', legend_font_size, 'bold'), anchor=tk.W)
         self.create_text(legend_x, legend_y + 15, text="Y: Pitch", fill='green', 
-                        font=('Helvetica', 10, 'bold'), anchor=tk.W)
+                        font=('Helvetica', legend_font_size, 'bold'), anchor=tk.W)
         self.create_text(legend_x, legend_y + 30, text="Z: Yaw", fill='blue', 
-                        font=('Helvetica', 10, 'bold'), anchor=tk.W)
+                        font=('Helvetica', legend_font_size, 'bold'), anchor=tk.W)
         
         self.update_arrows(0, 0, 0)
         
+        # Bind resize event to update the visualization
+        self.bind('<Configure>', self.on_resize)
+        
+    def on_resize(self, event):
+        """Handle resize events to update the visualization"""
+        # Only update if the size has changed significantly
+        if abs(event.width - self.size) > 10 or abs(event.height - self.size) > 10:
+            # Ensure minimum size for high-res displays
+            self.size = max(min(event.width, event.height), 300)
+            self.center_x = event.width // 2
+            self.center_y = event.height // 2
+            self.arrow_length = self.size // 3
+            
+            # Clear and redraw
+            self.delete("all")
+            
+            # Redraw background circle
+            self.create_oval(
+                self.center_x - self.arrow_length - 15,
+                self.center_y - self.arrow_length - 15,
+                self.center_x + self.arrow_length + 15,
+                self.center_y + self.arrow_length + 15,
+                fill=DARKER_BG, outline=TEXT_COLOR, width=1
+            )
+            
+            # Redraw arrows with scaled width
+            arrow_width = max(4, int(self.size / 55))  # Scale arrow width with size
+            self.x_arrow = self.create_line(0, 0, 0, 0, fill='red', width=arrow_width, arrow=tk.LAST)
+            self.y_arrow = self.create_line(0, 0, 0, 0, fill='green', width=arrow_width, arrow=tk.LAST)
+            self.z_arrow = self.create_line(0, 0, 0, 0, fill='blue', width=arrow_width, arrow=tk.LAST)
+            
+            # Redraw labels with scaled font size
+            font_size = max(14, int(self.size / 15))
+            self.create_text(self.center_x + self.arrow_length + 12, self.center_y, 
+                            text="X", fill='red', font=('Helvetica', font_size, 'bold'))
+            self.create_text(self.center_x, self.center_y - self.arrow_length - 12, 
+                            text="Y", fill='green', font=('Helvetica', font_size, 'bold'))
+            self.create_text(self.center_x + 12, self.center_y + 12, 
+                            text="Z", fill='blue', font=('Helvetica', font_size, 'bold'))
+            
+            # Redraw legend with scaled font size
+            legend_x = 15
+            legend_y = self.size - 60
+            legend_font_size = max(10, int(self.size / 22))
+            self.create_text(legend_x, legend_y, text="X: Roll", fill='red', 
+                            font=('Helvetica', legend_font_size, 'bold'), anchor=tk.W)
+            self.create_text(legend_x, legend_y + 15, text="Y: Pitch", fill='green', 
+                            font=('Helvetica', legend_font_size, 'bold'), anchor=tk.W)
+            self.create_text(legend_x, legend_y + 30, text="Z: Yaw", fill='blue', 
+                            font=('Helvetica', legend_font_size, 'bold'), anchor=tk.W)
+            
+            # Update arrows with current values
+            if hasattr(self, '_last_yaw'):
+                self.update_arrows(self._last_yaw, self._last_pitch, self._last_roll)
+        
     def update_arrows(self, yaw, pitch, roll):
         """Update arrow positions based on IMU orientation"""
+        # Store last values for resize handling
+        self._last_yaw = yaw
+        self._last_pitch = pitch
+        self._last_roll = roll
+        
         # Convert angles to radians
         yaw_rad = math.radians(yaw)
         pitch_rad = math.radians(pitch)
@@ -557,17 +652,28 @@ class XYZArrows(tk.Canvas):
 
 # Create XYZ arrows visualization with flexible resizing
 arrows_frame = ttk.LabelFrame(readouts_frame, text="IMU Orientation", padding="10")
-arrows_frame.pack(fill=tk.X, pady=10, expand=True)
+arrows_frame.pack(fill=tk.BOTH, expand=True, pady=10)
 arrows_frame.columnconfigure(0, weight=1)
 arrows_frame.rowconfigure(0, weight=1)
+
+# Set a minimum height for the arrows frame to ensure it's visible on high-res displays
+arrows_frame.update_idletasks()
+min_height = 400  # Minimum height for high-res displays
+if arrows_frame.winfo_height() < min_height:
+    arrows_frame.configure(height=min_height)
 
 arrows_container = ttk.Frame(arrows_frame)
 arrows_container.pack(fill=tk.BOTH, expand=True, pady=5)
 arrows_container.columnconfigure(0, weight=1)
 arrows_container.rowconfigure(0, weight=1)
 
-xyz_arrows = XYZArrows(arrows_container, size=220)
-xyz_arrows.pack(pady=10, expand=True)
+# Create a responsive XYZ arrows widget that will resize with the window
+xyz_arrows = XYZArrows(arrows_container, size=300)  # Increased initial size for high-res displays
+xyz_arrows.pack(fill=tk.BOTH, expand=True, pady=10)
+
+# Make the readouts tab expand properly
+readouts_tab.columnconfigure(0, weight=1)
+readouts_tab.rowconfigure(0, weight=1)
 
 # Update angle display function without gauge references
 def update_angle_display(yaw, pitch, roll):
@@ -757,6 +863,31 @@ root.after(10, redraw_if_needed)
 
 # Call configure_paned_window after a delay to ensure proper initial sizing
 root.after(100, configure_paned_window)
+
+# Add window resize event handler
+def on_window_resize(event):
+    # Only process if it's a window resize event
+    if event.widget == root:
+        # Force update of the readouts tab to ensure proper sizing
+        readouts_frame.update_idletasks()
+        
+        # Ensure the arrows frame has a minimum height on high-res displays
+        min_height = 400
+        if arrows_frame.winfo_height() < min_height:
+            arrows_frame.configure(height=min_height)
+        
+        # Update the XYZ arrows visualization
+        if hasattr(xyz_arrows, '_last_yaw'):
+            xyz_arrows.update_arrows(xyz_arrows._last_yaw, xyz_arrows._last_pitch, xyz_arrows._last_roll)
+        
+        # Update the paned window
+        configure_paned_window()
+        
+        # Force a redraw of the matplotlib figure to ensure it scales properly
+        figure_canvas.draw()
+
+# Bind the window resize event
+root.bind('<Configure>', on_window_resize)
 
 # Run the Tkinter main loop
 root.mainloop()
