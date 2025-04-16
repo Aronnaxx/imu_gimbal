@@ -453,26 +453,75 @@ style.configure("Yaw.Horizontal.TProgressbar", background=HIGHLIGHT)
 style.configure("Pitch.Horizontal.TProgressbar", background=SUCCESS_COLOR)
 style.configure("Roll.Horizontal.TProgressbar", background=ACCENT_COLOR)
 
+# Create a function to update font sizes based on window size
+def update_angle_display_fonts(event=None):
+    # Get the current width of the angle display frame
+    width = angle_display.winfo_width()
+    if width < 10:  # If width is not yet available, use a default
+        width = 300
+    
+    # Calculate font size based on width (scale with window size)
+    base_font_size = max(8, int(width / 40))
+    label_font = ('Helvetica', base_font_size, 'bold')
+    value_font = ('Helvetica', base_font_size, 'bold')
+    
+    # Update font for all labels
+    yaw_label.configure(font=label_font)
+    pitch_label.configure(font=label_font)
+    roll_label.configure(font=label_font)
+    
+    # Update font for all value labels
+    yaw_value.configure(font=value_font)
+    pitch_value.configure(font=value_font)
+    roll_value.configure(font=value_font)
+    
+    # Update padding based on width
+    pad_x = max(4, int(width / 30))
+    pad_y = max(2, int(width / 100))
+    
+    # Update padding for all widgets
+    yaw_progress.grid(padx=pad_x, pady=pad_y)
+    pitch_progress.grid(padx=pad_x, pady=pad_y)
+    roll_progress.grid(padx=pad_x, pady=pad_y)
+    
+    yaw_label.grid(pady=pad_y)
+    pitch_label.grid(pady=pad_y)
+    roll_label.grid(pady=pad_y)
+    
+    yaw_value.grid(pady=pad_y)
+    pitch_value.grid(pady=pad_y)
+    roll_value.grid(pady=pad_y)
+
 # Yaw display
-ttk.Label(angle_display, text="Yaw:", font=('Helvetica', 10, 'bold')).grid(row=0, column=0, sticky=tk.W, pady=4)
+yaw_label = ttk.Label(angle_display, text="Yaw:", font=('Helvetica', 10, 'bold'))
+yaw_label.grid(row=0, column=0, sticky=tk.W, pady=4)
 yaw_progress = ttk.Progressbar(angle_display, orient=tk.HORIZONTAL, mode='determinate',
                               maximum=180, value=90, style="Yaw.Horizontal.TProgressbar")
 yaw_progress.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=8, pady=4)
-ttk.Label(angle_display, textvariable=yaw_var, font=('Helvetica', 10, 'bold')).grid(row=0, column=2, sticky=tk.E, pady=4)
+yaw_value = ttk.Label(angle_display, textvariable=yaw_var, font=('Helvetica', 10, 'bold'))
+yaw_value.grid(row=0, column=2, sticky=tk.E, pady=4)
 
 # Pitch display
-ttk.Label(angle_display, text="Pitch:", font=('Helvetica', 10, 'bold')).grid(row=1, column=0, sticky=tk.W, pady=4)
+pitch_label = ttk.Label(angle_display, text="Pitch:", font=('Helvetica', 10, 'bold'))
+pitch_label.grid(row=1, column=0, sticky=tk.W, pady=4)
 pitch_progress = ttk.Progressbar(angle_display, orient=tk.HORIZONTAL, mode='determinate',
                                maximum=180, value=90, style="Pitch.Horizontal.TProgressbar")
 pitch_progress.grid(row=1, column=1, sticky=(tk.W, tk.E), padx=8, pady=4)
-ttk.Label(angle_display, textvariable=pitch_var, font=('Helvetica', 10, 'bold')).grid(row=1, column=2, sticky=tk.E, pady=4)
+pitch_value = ttk.Label(angle_display, textvariable=pitch_var, font=('Helvetica', 10, 'bold'))
+pitch_value.grid(row=1, column=2, sticky=tk.E, pady=4)
 
 # Roll display
-ttk.Label(angle_display, text="Roll:", font=('Helvetica', 10, 'bold')).grid(row=2, column=0, sticky=tk.W, pady=4)
+roll_label = ttk.Label(angle_display, text="Roll:", font=('Helvetica', 10, 'bold'))
+roll_label.grid(row=2, column=0, sticky=tk.W, pady=4)
 roll_progress = ttk.Progressbar(angle_display, orient=tk.HORIZONTAL, mode='determinate',
                               maximum=180, value=90, style="Roll.Horizontal.TProgressbar")
 roll_progress.grid(row=2, column=1, sticky=(tk.W, tk.E), padx=8, pady=4)
-ttk.Label(angle_display, textvariable=roll_var, font=('Helvetica', 10, 'bold')).grid(row=2, column=2, sticky=tk.E, pady=4)
+roll_value = ttk.Label(angle_display, textvariable=roll_var, font=('Helvetica', 10, 'bold'))
+roll_value.grid(row=2, column=2, sticky=tk.E, pady=4)
+
+# Bind resize event to update fonts
+angle_display.bind('<Configure>', update_angle_display_fonts)
+angle_display_frame.bind('<Configure>', update_angle_display_fonts)
 
 # Create a separator between angle bars and IMU visualization
 ttk.Separator(readouts_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=15)
@@ -525,15 +574,17 @@ class XYZArrows(tk.Canvas):
         self.create_text(self.center_x + 12, self.center_y + 12, 
                         text="Z", fill='blue', font=('Helvetica', font_size, 'bold'))
         
-        # Create a small legend in the corner
+        # Create a small legend in the corner with better spacing
         legend_x = 15
-        legend_y = self.size - 60
+        legend_y = self.size - 80  # Move up to avoid overlap
         legend_font_size = max(10, int(self.size / 22))  # Scale legend font size
+        legend_spacing = max(20, int(self.size / 20))  # Scale spacing with size
+        
         self.create_text(legend_x, legend_y, text="X: Roll", fill='red', 
                         font=('Helvetica', legend_font_size, 'bold'), anchor=tk.W)
-        self.create_text(legend_x, legend_y + 15, text="Y: Pitch", fill='green', 
+        self.create_text(legend_x, legend_y + legend_spacing, text="Y: Pitch", fill='green', 
                         font=('Helvetica', legend_font_size, 'bold'), anchor=tk.W)
-        self.create_text(legend_x, legend_y + 30, text="Z: Yaw", fill='blue', 
+        self.create_text(legend_x, legend_y + legend_spacing * 2, text="Z: Yaw", fill='blue', 
                         font=('Helvetica', legend_font_size, 'bold'), anchor=tk.W)
         
         self.update_arrows(0, 0, 0)
@@ -578,15 +629,17 @@ class XYZArrows(tk.Canvas):
             self.create_text(self.center_x + 12, self.center_y + 12, 
                             text="Z", fill='blue', font=('Helvetica', font_size, 'bold'))
             
-            # Redraw legend with scaled font size
+            # Redraw legend with scaled font size and spacing
             legend_x = 15
-            legend_y = self.size - 60
+            legend_y = self.size - 80  # Move up to avoid overlap
             legend_font_size = max(10, int(self.size / 22))
+            legend_spacing = max(20, int(self.size / 20))  # Scale spacing with size
+            
             self.create_text(legend_x, legend_y, text="X: Roll", fill='red', 
                             font=('Helvetica', legend_font_size, 'bold'), anchor=tk.W)
-            self.create_text(legend_x, legend_y + 15, text="Y: Pitch", fill='green', 
+            self.create_text(legend_x, legend_y + legend_spacing, text="Y: Pitch", fill='green', 
                             font=('Helvetica', legend_font_size, 'bold'), anchor=tk.W)
-            self.create_text(legend_x, legend_y + 30, text="Z: Yaw", fill='blue', 
+            self.create_text(legend_x, legend_y + legend_spacing * 2, text="Z: Yaw", fill='blue', 
                             font=('Helvetica', legend_font_size, 'bold'), anchor=tk.W)
             
             # Update arrows with current values
@@ -674,6 +727,27 @@ xyz_arrows.pack(fill=tk.BOTH, expand=True, pady=10)
 # Make the readouts tab expand properly
 readouts_tab.columnconfigure(0, weight=1)
 readouts_tab.rowconfigure(0, weight=1)
+
+# Function to update arrows frame size on window resize
+def update_arrows_frame_size(event=None):
+    # Get the current width of the readouts frame
+    width = readouts_frame.winfo_width()
+    if width < 10:  # If width is not yet available, use a default
+        width = 300
+    
+    # Calculate minimum height based on width
+    min_height = max(400, int(width * 0.8))
+    
+    # Update the arrows frame height if needed
+    if arrows_frame.winfo_height() < min_height:
+        arrows_frame.configure(height=min_height)
+    
+    # Force update of the arrows visualization
+    if hasattr(xyz_arrows, '_last_yaw'):
+        xyz_arrows.update_arrows(xyz_arrows._last_yaw, xyz_arrows._last_pitch, xyz_arrows._last_roll)
+
+# Bind resize event to update arrows frame size
+readouts_frame.bind('<Configure>', update_arrows_frame_size)
 
 # Update angle display function without gauge references
 def update_angle_display(yaw, pitch, roll):
@@ -871,10 +945,11 @@ def on_window_resize(event):
         # Force update of the readouts tab to ensure proper sizing
         readouts_frame.update_idletasks()
         
-        # Ensure the arrows frame has a minimum height on high-res displays
-        min_height = 400
-        if arrows_frame.winfo_height() < min_height:
-            arrows_frame.configure(height=min_height)
+        # Update the angle display fonts
+        update_angle_display_fonts()
+        
+        # Update the arrows frame size
+        update_arrows_frame_size()
         
         # Update the XYZ arrows visualization
         if hasattr(xyz_arrows, '_last_yaw'):
