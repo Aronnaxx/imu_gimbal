@@ -108,10 +108,12 @@ SUCCESS_COLOR = "#2ecc71"
 DANGER_COLOR = "#e74c3c"
 
 # Find Arduino port automatically
-def find_arduino_port():
+def find_port():
     ports = list(serial.tools.list_ports.comports())
     for port in ports:
-        if 'Arduino' in port.description or 'usbmodem' in port.device:
+        if ('Arduino' in port.description or 
+            'usbmodem' in port.device or 
+            'FT232H' in port.description):
             return port.device
     return None
 
@@ -155,7 +157,7 @@ def setup_styles():
               foreground=[('selected', TEXT_COLOR)])
 
 # Try to find Arduino port automatically, otherwise use default
-PORT = find_arduino_port() or '/dev/tty.usbmodem101'
+PORT = find_port()
 BAUD = 115200
 
 # Initialize serial connection
