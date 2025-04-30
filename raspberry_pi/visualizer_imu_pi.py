@@ -3,7 +3,7 @@ import time
 from typing import Optional, Tuple
 
 # Import visualization components
-from ..visualizer_imu import (
+from visualizer_imu import (
     tk, ttk, plt, FuncAnimation, Axes3D, FigureCanvasTkAgg,
     threading, np, Image, ImageTk, ImageDraw, math, colorsys,
     AngleUnwrapper, KalmanFilter3D, DynamixelControlApp
