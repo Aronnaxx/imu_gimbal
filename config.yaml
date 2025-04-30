@@ -1,0 +1,35 @@
+dynamixel_settings:
+  # --- Connection Settings ---
+  DEVICENAME: '/dev/tty.usbserial-FTA7NRJ9' 
+  BAUDRATE: 57600
+  PROTOCOL_VERSION: 2.0
+
+  # --- Servo Configuration ---
+  SERVO_IDS: [1, 2, 3]
+
+  # --- Control Table Addresses (XM-430 specific) ---
+  ADDR_OPERATING_MODE: 11
+  ADDR_TORQUE_ENABLE: 64
+  ADDR_PROFILE_VELOCITY: 112
+  ADDR_GOAL_VELOCITY: 104    
+  ADDR_GOAL_POSITION: 116
+  ADDR_PRESENT_POSITION: 132
+  ADDR_PRESENT_VELOCITY: 128
+  ADDR_PRESENT_TEMPERATURE: 146
+  ADDR_PRESENT_LOAD: 126
+  MAX_VELOCITY_UNIT: 1023
+
+  # --- Operating Modes ---
+  MODE_VELOCITY_CONTROL: 1
+  MODE_POSITION_CONTROL: 3
+
+  # --- Torque Values ---
+  TORQUE_ENABLE: 1
+  TORQUE_DISABLE: 0 
+
+  # --- Random Movement Configuration ---
+  ENABLE_RANDOM_MOVEMENT: true
+  RANDOM_MIN_SPEED_PERCENT: 10  # Minimum speed percentage (0-100)
+  RANDOM_MAX_SPEED_PERCENT: 70  # Maximum speed percentage (0-100)
+  RANDOM_MIN_DURATION_S: 1.0    # Minimum duration for a random move (seconds)
+  RANDOM_MAX_DURATION_S: 4.0    # Maximum duration for a random move (seconds)

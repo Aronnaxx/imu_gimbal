@@ -1,8 +1,8 @@
+# Core visualization dependencies
 matplotlib
 numpy
-pyserial
 Pillow
+
+# Raspberry Pi BNO055 dependencies
 adafruit-circuitpython-bno055
-adafruit-circuitpython-pca9685
-adafruit-circuitpython-servokit
 adafruit-blinka
