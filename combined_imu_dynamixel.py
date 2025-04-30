@@ -16,6 +16,7 @@ import colorsys
 import yaml
 import os
 import sys
+import platform
 
 # Conditional import for Dynamixel SDK based on OS
 if os.name == 'nt':
@@ -97,6 +98,19 @@ dxl_lock = threading.Lock()
 # Initialize Dynamixel communication
 portHandler = PortHandler(DXL_DEVICENAME)
 packetHandler = PacketHandler(PROTOCOL_VERSION)
+
+# Import IMU-related modules based on platform
+IS_RASPBERRY_PI = platform.machine().startswith('arm') or platform.machine().startswith('aarch')
+if IS_RASPBERRY_PI:
+    try:
+        import board
+        import busio
+        import adafruit_bno055
+        from raspberry_pi.bno055_imu import BNO055_IMU
+    except ImportError as e:
+        print(f"Error importing Raspberry Pi specific modules: {e}")
+        print("Please install required packages: pip install adafruit-circuitpython-bno055")
+        sys.exit(1)
 
 # Helper class for IMU angle unwrapping
 class AngleUnwrapper:
@@ -219,17 +233,8 @@ class CombinedIMUDynamixelApp:
         self.yaw_unwrapper = AngleUnwrapper()
         self.euler_regex = re.compile(r"Euler:\s*([\d\.-]+),\s*([\d\.-]+),\s*([\d\.-]+)")
         
-        # Initialize IMU serial connection
-        self.imu_port = self.find_imu_port()
-        if not self.imu_port:
-            print("Error: IMU port not found")
-            sys.exit(1)
-        try:
-            self.imu_serial = serial.Serial(self.imu_port, 115200, timeout=1)
-            print(f"Connected to IMU on {self.imu_port}")
-        except serial.SerialException as e:
-            print(f"Error connecting to IMU: {e}")
-            sys.exit(1)
+        # Initialize IMU based on platform
+        self.initialize_imu()
         
         # Initialize plot update flags
         self.redraw_needed = False
@@ -268,6 +273,28 @@ class CombinedIMUDynamixelApp:
         
         # Setup closing handler
         root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+    def initialize_imu(self):
+        """Initialize IMU based on platform."""
+        if IS_RASPBERRY_PI:
+            try:
+                self.imu = BNO055_IMU()
+                print("Connected to BNO055 IMU via I2C")
+            except Exception as e:
+                print(f"Error initializing BNO055 IMU: {e}")
+                sys.exit(1)
+        else:
+            # Find and connect to IMU via serial for non-Raspberry Pi platforms
+            self.imu_port = self.find_imu_port()
+            if not self.imu_port:
+                print("Error: IMU port not found")
+                sys.exit(1)
+            try:
+                self.imu_serial = serial.Serial(self.imu_port, 115200, timeout=1)
+                print(f"Connected to IMU on {self.imu_port}")
+            except serial.SerialException as e:
+                print(f"Error connecting to IMU: {e}")
+                sys.exit(1)
 
     def find_imu_port(self):
         """Find Arduino/IMU port automatically."""
@@ -331,15 +358,11 @@ class CombinedIMUDynamixelApp:
     def update_imu(self):
         """Read and process IMU data."""
         while not stop_event.is_set():
-            if self.imu_serial.in_waiting > 0:
-                try:
-                    line = self.imu_serial.readline().decode('utf-8', errors='replace').strip()
-                    match = self.euler_regex.match(line)
-                    
-                    if match:
-                        yaw = float(match.group(1))
-                        pitch = float(match.group(2))
-                        roll = float(match.group(3))
+            try:
+                if IS_RASPBERRY_PI:
+                    euler = self.imu.read_euler()
+                    if euler:
+                        yaw, pitch, roll = euler
                         
                         if self.continuous_yaw:
                             yaw = self.yaw_unwrapper.unwrap(yaw)
@@ -359,20 +382,50 @@ class CombinedIMUDynamixelApp:
                         # Update angle display
                         self.root.after(0, self.update_angle_display,
                             filtered[0], filtered[1], filtered[2])
+                else:
+                    if self.imu_serial.in_waiting > 0:
+                        line = self.imu_serial.readline().decode('utf-8', errors='replace').strip()
+                        match = self.euler_regex.match(line)
                         
-                        if len(self.x_data) > DATA_HISTORY_LENGTH:
-                            self.x_data = self.x_data[-DATA_HISTORY_LENGTH:]
-                            self.y_data = self.y_data[-DATA_HISTORY_LENGTH:]
-                            self.z_data = self.z_data[-DATA_HISTORY_LENGTH:]
-                            self.x_filtered = self.x_filtered[-DATA_HISTORY_LENGTH:]
-                            self.y_filtered = self.y_filtered[-DATA_HISTORY_LENGTH:]
-                            self.z_filtered = self.z_filtered[-DATA_HISTORY_LENGTH:]
-                        
-                        self.schedule_redraw()
-                except Exception as e:
-                    print(f"Error reading IMU data: {e}")
-                    if self.imu_serial.in_waiting > 100:
-                        self.imu_serial.reset_input_buffer()
+                        if match:
+                            yaw = float(match.group(1))
+                            pitch = float(match.group(2))
+                            roll = float(match.group(3))
+                            
+                            if self.continuous_yaw:
+                                yaw = self.yaw_unwrapper.unwrap(yaw)
+                            
+                            measurement = np.array([yaw, pitch, roll])
+                            self.kalman_filter.predict()
+                            filtered = self.kalman_filter.update(measurement)
+                            
+                            self.x_data.append(yaw)
+                            self.y_data.append(pitch)
+                            self.z_data.append(roll)
+                            
+                            self.x_filtered.append(filtered[0])
+                            self.y_filtered.append(filtered[1])
+                            self.z_filtered.append(filtered[2])
+                            
+                            # Update angle display
+                            self.root.after(0, self.update_angle_display,
+                                filtered[0], filtered[1], filtered[2])
+                
+                # Manage data history length
+                if len(self.x_data) > DATA_HISTORY_LENGTH:
+                    self.x_data = self.x_data[-DATA_HISTORY_LENGTH:]
+                    self.y_data = self.y_data[-DATA_HISTORY_LENGTH:]
+                    self.z_data = self.z_data[-DATA_HISTORY_LENGTH:]
+                    self.x_filtered = self.x_filtered[-DATA_HISTORY_LENGTH:]
+                    self.y_filtered = self.y_filtered[-DATA_HISTORY_LENGTH:]
+                    self.z_filtered = self.z_filtered[-DATA_HISTORY_LENGTH:]
+                
+                self.schedule_redraw()
+                
+            except Exception as e:
+                print(f"Error reading IMU data: {e}")
+                if not IS_RASPBERRY_PI and self.imu_serial.in_waiting > 100:
+                    self.imu_serial.reset_input_buffer()
             
             time.sleep(0.01)  # Small delay to prevent busy waiting
 
@@ -711,8 +764,11 @@ class CombinedIMUDynamixelApp:
     def zero_imu(self):
         """Zero the IMU."""
         try:
-            self.imu_serial.write(b"ZERO\n")
-            self.imu_serial.flush()
+            if IS_RASPBERRY_PI:
+                self.imu.zero_imu()
+            else:
+                self.imu_serial.write(b"ZERO\n")
+                self.imu_serial.flush()
             print("Zeroing IMU")
             # Reset Kalman filter and angle unwrapper
             self.kalman_filter = KalmanFilter3D()
@@ -776,9 +832,13 @@ class CombinedIMUDynamixelApp:
         stop_event.set()
         self.update_status_active = False
         
-        # Close IMU serial connection
-        if hasattr(self, 'imu_serial') and self.imu_serial.is_open:
-            self.imu_serial.close()
+        # Close IMU connection
+        if IS_RASPBERRY_PI:
+            if hasattr(self, 'imu'):
+                self.imu.close()
+        else:
+            if hasattr(self, 'imu_serial') and self.imu_serial.is_open:
+                self.imu_serial.close()
         
         # Cleanup Dynamixel
         for servo_id in SERVO_IDS:
