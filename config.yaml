@@ -1,6 +1,6 @@
 dynamixel_settings:
   # --- Connection Settings ---
-  DEVICENAME: '/dev/tty.usbserial-FTA7NRJ9' 
+  DEVICENAME: '/dev/ttyUSB0' 
   BAUDRATE: 57600
   PROTOCOL_VERSION: 2.0
 
