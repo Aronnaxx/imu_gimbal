@@ -100,13 +100,13 @@ portHandler = PortHandler(DXL_DEVICENAME)
 packetHandler = PacketHandler(PROTOCOL_VERSION)
 
 # Import IMU-related modules based on platform
-IS_RASPBERRY_PI = platform.machine().startswith('arm') or platform.machine().startswith('aarch')
-if IS_RASPBERRY_PI:
+IS_ARM_MACHINE = platform.machine().startswith('arm') or platform.machine().startswith('aarch')
+if IS_ARM_MACHINE:
     try:
         import board
         import busio
         import adafruit_bno055
-        from raspberry_pi.bno055_imu import BNO055_IMU
+        from arm_machine.bno055_imu import BNO055_IMU
     except ImportError as e:
         print(f"Error importing Raspberry Pi specific modules: {e}")
         print("Please install required packages: pip install adafruit-circuitpython-bno055")
@@ -276,7 +276,7 @@ class CombinedIMUDynamixelApp:
 
     def initialize_imu(self):
         """Initialize IMU based on platform."""
-        if IS_RASPBERRY_PI:
+        if IS_ARM_MACHINE:
             try:
                 self.imu = BNO055_IMU()
                 print("Connected to BNO055 IMU via I2C")
@@ -359,7 +359,7 @@ class CombinedIMUDynamixelApp:
         """Read and process IMU data."""
         while not stop_event.is_set():
             try:
-                if IS_RASPBERRY_PI:
+                if IS_ARM_MACHINE:
                     euler = self.imu.read_euler()
                     if euler:
                         yaw, pitch, roll = euler
@@ -424,7 +424,7 @@ class CombinedIMUDynamixelApp:
                 
             except Exception as e:
                 print(f"Error reading IMU data: {e}")
-                if not IS_RASPBERRY_PI and self.imu_serial.in_waiting > 100:
+                if not IS_ARM_MACHINE and self.imu_serial.in_waiting > 100:
                     self.imu_serial.reset_input_buffer()
             
             time.sleep(0.01)  # Small delay to prevent busy waiting
@@ -764,7 +764,7 @@ class CombinedIMUDynamixelApp:
     def zero_imu(self):
         """Zero the IMU."""
         try:
-            if IS_RASPBERRY_PI:
+            if IS_ARM_MACHINE:
                 self.imu.zero_imu()
             else:
                 self.imu_serial.write(b"ZERO\n")
@@ -833,7 +833,7 @@ class CombinedIMUDynamixelApp:
         self.update_status_active = False
         
         # Close IMU connection
-        if IS_RASPBERRY_PI:
+        if IS_ARM_MACHINE:
             if hasattr(self, 'imu'):
                 self.imu.close()
         else:
