@@ -11,7 +11,7 @@ class BNO055_IMU:
             # Jetson AGX Orin specific I2C setup
             # Using bus 1 pins (board.SCL_1, board.SDA_1) which correspond to physical pins 3 and 5.
             # NOTE: i2cdetect found the device on bus 7. If this fails, Blinka might be mapping these pins incorrectly.
-            self.i2c = busio.I2C(board.SCL_1, board.SDA_1)
+            self.i2c = busio.I2C(board.SCL_7, board.SDA_7)
         else:
             # Default Raspberry Pi setup
             self.i2c = busio.I2C(board.SCL, board.SDA)
