@@ -3,7 +3,7 @@
 # --- CONFIGURE THESE VARIABLES ---
 WORKDIR="/home/operator/imu_gimbal"
 SCRIPT="arm_machine/spin_mode.py"
-PYENV="$WORKDIR/venv/bin/activate"  # Path to your virtualenv activate script
+PYENV="$WORKDIR/.venv/bin/activate"
 USER="operator"
 SERVICE_NAME="spinmode.service"
 
