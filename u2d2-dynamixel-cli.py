@@ -242,9 +242,81 @@ def print_status(servo_id):
     else:
         print(f"  Load: --")
 
+def rpm_to_velocity_units(rpm):
+    # For XL430, velocity = (RPM / 0.229)
+    # For other models, adjust as needed
+    return int(rpm / 0.229)
+
+def interactive_cli():
+    print("\nDynamixel Interactive CLI. Type 'help' for commands. Type 'exit' to quit.")
+    while True:
+        try:
+            cmd = input('> ').strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\nExiting CLI.")
+            break
+        if not cmd:
+            continue
+        if cmd in ('exit', 'quit'):
+            break
+        if cmd == 'help':
+            print("""
+Commands:
+  torque <servo_id> <on|off>
+  velocity <servo_id> <velocity>
+  position <servo_id> <position> [speed]
+  status <servo_id>
+  random <start|stop>
+  help
+  exit
+""")
+            continue
+        parts = cmd.split()
+        if not parts:
+            continue
+        try:
+            if parts[0] == 'torque' and len(parts) == 3:
+                set_torque(int(parts[1]), parts[2] == 'on')
+            elif parts[0] == 'velocity' and len(parts) == 3:
+                set_operating_mode(int(parts[1]), MODE_VELOCITY_CONTROL)
+                set_torque(int(parts[1]), True)
+                set_goal_velocity(int(parts[1]), int(parts[2]))
+            elif parts[0] == 'position' and (len(parts) == 3 or len(parts) == 4):
+                set_operating_mode(int(parts[1]), MODE_POSITION_CONTROL)
+                set_torque(int(parts[1]), True)
+                speed = int(parts[3]) if len(parts) == 4 else MAX_VELOCITY_UNIT // 2
+                with dxl_lock:
+                    dxl_comm_result, dxl_error = packetHandler.write4ByteTxRx(portHandler, int(parts[1]), ADDR_PROFILE_VELOCITY, speed)
+                    check_comm_result(dxl_comm_result, dxl_error)
+                set_goal_position(int(parts[1]), int(parts[2]))
+            elif parts[0] == 'status' and len(parts) == 2:
+                print_status(int(parts[1]))
+            elif parts[0] == 'random' and len(parts) == 2:
+                if parts[1] == 'start':
+                    if not hasattr(interactive_cli, "random_thread") or not interactive_cli.random_thread.is_alive():
+                        stop_event.clear()
+                        interactive_cli.random_thread = threading.Thread(target=random_move_thread_func, daemon=True)
+                        interactive_cli.random_thread.start()
+                        logger.info("Random movement started.")
+                    else:
+                        logger.info("Random movement already running.")
+                elif parts[1] == 'stop':
+                    if hasattr(interactive_cli, "random_thread") and interactive_cli.random_thread.is_alive():
+                        stop_event.set()
+                        interactive_cli.random_thread.join(timeout=1.0)
+                        logger.info("Random movement stopped.")
+                    else:
+                        logger.info("Random movement is not running.")
+                else:
+                    print("Usage: random <start|stop>")
+            else:
+                print("Unknown or malformed command. Type 'help' for usage.")
+        except Exception as e:
+            print(f"Error: {e}")
+
 def main():
     parser = argparse.ArgumentParser(description="Dynamixel CLI Control Tool")
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers = parser.add_subparsers(dest="command")
 
     # Enable/Disable Torque
     torque_parser = subparsers.add_parser("torque", help="Enable or disable torque")
@@ -272,7 +344,16 @@ def main():
 
     args = parser.parse_args()
 
-    if args.command == "torque":
+    if args.command is None:
+        # No arguments: set all servos to 25 RPM and enter interactive CLI
+        velocity_25rpm = rpm_to_velocity_units(25)
+        logger.info(f"Setting all servos to velocity control mode, enabling torque, and spinning at 25 RPM (velocity={velocity_25rpm})")
+        for servo_id in SERVO_IDS:
+            set_operating_mode(servo_id, MODE_VELOCITY_CONTROL)
+            set_torque(servo_id, True)
+            set_goal_velocity(servo_id, velocity_25rpm)
+        interactive_cli()
+    elif args.command == "torque":
         set_torque(args.servo_id, args.state == "on")
     elif args.command == "velocity":
         set_operating_mode(args.servo_id, MODE_VELOCITY_CONTROL)
