@@ -89,14 +89,16 @@ def set_goal_velocity(servo_id, velocity):
     return False
 
 # --- Spin Mode Logic ---
+SPIN_PERCENT = 0.2  # 20% of max speed
+SPIN_VELOCITY_UNIT = int(SPIN_PERCENT * MAX_VELOCITY_UNIT)
 spin_velocities = {
-    1: MAX_VELOCITY_UNIT,   # Positive
-    2: -MAX_VELOCITY_UNIT,  # Negative
-    3: MAX_VELOCITY_UNIT    # Positive
+    1: SPIN_VELOCITY_UNIT,   # Positive
+    2: -SPIN_VELOCITY_UNIT,  # Negative
+    3: SPIN_VELOCITY_UNIT    # Positive
 }
 
 # Only use IDs that are present in config
-spin_velocities = {sid: spin_velocities.get(sid, MAX_VELOCITY_UNIT) for sid in SERVO_IDS}
+spin_velocities = {sid: spin_velocities.get(sid, SPIN_VELOCITY_UNIT) for sid in SERVO_IDS}
 
 running = True
 def shutdown_handler(signum, frame):
