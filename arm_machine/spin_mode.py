@@ -54,6 +54,15 @@ if not portHandler.setBaudRate(BAUDRATE):
 logger.info(f"Set baudrate: {BAUDRATE}")
 
 # --- Helper Functions ---
+def clamp_velocity(velocity):
+    if velocity > MAX_VELOCITY_UNIT:
+        logger.warning(f"Velocity {velocity} exceeds MAX_VELOCITY_UNIT {MAX_VELOCITY_UNIT}, clamping.")
+        return MAX_VELOCITY_UNIT
+    elif velocity < -MAX_VELOCITY_UNIT:
+        logger.warning(f"Velocity {velocity} below -MAX_VELOCITY_UNIT {-MAX_VELOCITY_UNIT}, clamping.")
+        return -MAX_VELOCITY_UNIT
+    return velocity
+
 def check_comm_result(dxl_comm_result, dxl_error, context=""):
     if dxl_comm_result != 0:
         logger.error(f"{context} Comm error: {packetHandler.getTxRxResult(dxl_comm_result)}")
@@ -82,6 +91,7 @@ def set_torque(servo_id, enable):
     return False
 
 def set_goal_velocity(servo_id, velocity):
+    velocity = clamp_velocity(velocity)
     dxl_comm_result, dxl_error = packetHandler.write4ByteTxRx(portHandler, servo_id, ADDR_GOAL_VELOCITY, velocity)
     if check_comm_result(dxl_comm_result, dxl_error, f"Servo {servo_id} set velocity {velocity}"):
         logger.debug(f"Servo {servo_id} velocity set to {velocity}.")
