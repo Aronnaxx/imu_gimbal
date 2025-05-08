@@ -1,14 +1,6 @@
-# Core visualization dependencies
-matplotlib
-numpy
-Pillow
-
-# Raspberry Pi BNO055 dependencies
-adafruit-circuitpython-bno055
-adafruit-blinka
-
 # Dynamixel dependencies
 dynamixel-sdk
 
 # YAML dependencies
 pyyaml
+pyserial
