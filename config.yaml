@@ -26,4 +26,4 @@ dynamixel_settings:
   MAX_VELOCITY_UNIT: 1023      # Max raw velocity value the servo accepts (e.g., 0-1023).
                                # This is NOT max RPM, but the hardware unit limit.
                                # Check your servo manual (e.g., XL-430 is often 1023 at full range).
-  DEFAULT_START_RPM: 25.0      # Default RPM to start servos at on startup.
+  DEFAULT_START_RPM: 5.0      # Default RPM to start servos at on startup.
