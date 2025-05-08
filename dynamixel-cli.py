@@ -3,6 +3,8 @@ import os
 import yaml
 import time
 import threading
+import glob
+import logging
 
 # Conditional import for getch (not actively used in the main CLI input loop)
 if os.name == 'nt':
@@ -42,7 +44,8 @@ CONFIG_FILE = 'config.yaml'
 # For XL430-W250, this is approximately 0.229 RPM per unit.
 # YOU MAY NEED TO ADJUST THIS for your specific servo model and voltage for accurate RPM.
 RPM_PER_UNIT_VELOCITY = 0.229
-DEFAULT_START_RPM = 25.0
+
+logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 
 # --- Load Configuration from YAML ---
 config = None
@@ -69,7 +72,7 @@ except Exception as e:
 try:
     PROTOCOL_VERSION        = float(config['PROTOCOL_VERSION'])
     BAUDRATE                = int(config['BAUDRATE'])
-    DEVICENAME              = config['DEVICENAME']
+    DEVICENAME              = config.get('DEVICENAME', 'auto')
     SERVO_IDS               = config.get('SERVO_IDS', [])
     if not isinstance(SERVO_IDS, list) or not all(isinstance(sid, int) for sid in SERVO_IDS):
         raise ValueError("SERVO_IDS must be a list of integers in config.yaml.")
@@ -85,6 +88,8 @@ try:
     TORQUE_DISABLE          = int(config['TORQUE_DISABLE'])
     MAX_VELOCITY_UNIT       = int(config.get('MAX_VELOCITY_UNIT', 1023)) # Default for many X-series
 
+    DEFAULT_START_RPM       = float(config.get('DEFAULT_START_RPM', 25.0))
+
 except KeyError as e:
     print(f"Error: Missing required key {e} in 'dynamixel_settings' in '{CONFIG_FILE}'.")
     sys.exit(1)
@@ -94,6 +99,29 @@ except ValueError as e:
 except Exception as e:
     print(f"An unexpected error occurred processing config values: {e}")
     sys.exit(1)
+
+# --- Auto-detect Serial Port if Needed ---
+def auto_detect_serial_port():
+    # Linux: /dev/ttyUSB*, /dev/ttyACM*
+    # macOS: /dev/tty.usbserial*, /dev/tty.usbmodem*
+    candidates = glob.glob('/dev/ttyUSB*') + glob.glob('/dev/ttyACM*')
+    candidates += glob.glob('/dev/tty.usbserial*') + glob.glob('/dev/tty.usbmodem*')
+    if not candidates:
+        logging.error("No serial ports found matching /dev/ttyUSB*, /dev/ttyACM*, /dev/tty.usbserial*, or /dev/tty.usbmodem*. Please connect your U2D2 and try again.")
+        return None
+    if len(candidates) > 1:
+        logging.warning(f"Multiple serial ports found: {candidates}. Using the first one: {candidates[0]}")
+    else:
+        logging.info(f"Auto-detected serial port: {candidates[0]}")
+    return candidates[0]
+
+if DEVICENAME == 'auto' or not DEVICENAME:
+    detected_port = auto_detect_serial_port()
+    if detected_port:
+        DEVICENAME = detected_port
+    else:
+        print("Could not auto-detect a serial port. Exiting.")
+        sys.exit(1)
 
 # --- Communication Results ---
 COMM_SUCCESS                = 0

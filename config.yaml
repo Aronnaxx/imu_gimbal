@@ -1,35 +1,29 @@
 dynamixel_settings:
-  # --- Connection Settings ---
-  DEVICENAME: '/dev/ttyUSB0' 
-  BAUDRATE: 57600
   PROTOCOL_VERSION: 2.0
+  BAUDRATE: 57600       # Common options: 57600, 115200, 1000000. Match your servos.
+  DEVICENAME: auto      # Set to 'auto' to enable automatic serial port detection.
 
-  # --- Servo Configuration ---
-  SERVO_IDS: [1, 2, 3]
+  SERVO_IDS: [1, 2, 3]     # Example: controlling servos with ID 1, 2, and 3.
+                           # Servo ID 2 will spin opposite on startup.
 
-  # --- Control Table Addresses (XM-430 specific) ---
+  # Control Table Addresses (Verify for your specific servo model, e.g., XL-430, XM-430)
   ADDR_OPERATING_MODE: 11
   ADDR_TORQUE_ENABLE: 64
-  ADDR_PROFILE_VELOCITY: 112
-  ADDR_GOAL_VELOCITY: 104    
-  ADDR_GOAL_POSITION: 116
-  ADDR_PRESENT_POSITION: 132
-  ADDR_PRESENT_VELOCITY: 128
-  ADDR_PRESENT_TEMPERATURE: 146
-  ADDR_PRESENT_LOAD: 126
-  MAX_VELOCITY_UNIT: 1023
+  ADDR_GOAL_VELOCITY: 104
+  ADDR_PRESENT_VELOCITY: 128   # Address for current velocity reading
+  # ADDR_PROFILE_VELOCITY: 112 # Only needed if you want to control acceleration IN POSITION MODE
+  # ADDR_GOAL_POSITION: 116    # Not used by this velocity-focused script
+  # ADDR_PRESENT_POSITION: 132 # Not used by this velocity-focused script
 
-  # --- Operating Modes ---
-  MODE_VELOCITY_CONTROL: 1
-  MODE_POSITION_CONTROL: 3
+  # Operating Modes
+  MODE_VELOCITY_CONTROL: 1     # Value for Wheel Mode / Velocity Control
+  # MODE_POSITION_CONTROL: 3   # Or 4 for Extended Position. Not used by this script.
 
-  # --- Torque Values ---
+  # Torque Values
   TORQUE_ENABLE: 1
-  TORQUE_DISABLE: 0 
+  TORQUE_DISABLE: 0
 
-  # --- Random Movement Configuration ---
-  ENABLE_RANDOM_MOVEMENT: false
-  RANDOM_MIN_SPEED_PERCENT: 10  # Minimum speed percentage (0-100)
-  RANDOM_MAX_SPEED_PERCENT: 70  # Maximum speed percentage (0-100)
-  RANDOM_MIN_DURATION_S: 1.0    # Minimum duration for a random move (seconds)
-  RANDOM_MAX_DURATION_S: 4.0    # Maximum duration for a random move (seconds)
+  MAX_VELOCITY_UNIT: 1023      # Max raw velocity value the servo accepts (e.g., 0-1023).
+                               # This is NOT max RPM, but the hardware unit limit.
+                               # Check your servo manual (e.g., XL-430 is often 1023 at full range).
+  DEFAULT_START_RPM: 25.0      # Default RPM to start servos at on startup.
