@@ -20,7 +20,7 @@ Type=simple
 User=$USER
 WorkingDirectory=$WORKDIR
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/bin/bash -c 'source $PYENV && python $SCRIPT'
+ExecStart=/bin/bash -c 'source $PYENV && python $SCRIPT --service'
 Restart=on-failure
 
 [Install]

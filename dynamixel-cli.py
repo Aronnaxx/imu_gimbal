@@ -5,6 +5,8 @@ import time
 import threading
 import glob
 import logging
+import argparse
+import signal
 
 # Conditional import for getch (not actively used in the main CLI input loop)
 if os.name == 'nt':
@@ -443,8 +445,87 @@ def main_cli():
             print("Port closed.")
         print("Application terminated.")
 
+def run_service_mode():
+    """Run the script in headless service mode: initialize servos, keep running, and clean up on SIGTERM/SIGINT."""
+    def cleanup_and_exit(signum=None, frame=None):
+        print("\n[Service Mode] Cleaning up: stopping servos and closing port...")
+        if portHandler.is_open and SERVO_IDS:
+            for sid in SERVO_IDS:
+                print(f"  Stopping servo {sid} and disabling torque...")
+                try:
+                    set_goal_velocity_dxl(sid, 0)
+                    time.sleep(0.05)
+                    set_torque_status(sid, False)
+                except Exception as e:
+                    print(f"  Exception during cleanup for servo {sid}: {e}")
+        if portHandler.is_open:
+            portHandler.closePort()
+            print("Port closed.")
+        print("[Service Mode] Application terminated.")
+        sys.exit(0)
+
+    # Register signal handlers for graceful shutdown
+    signal.signal(signal.SIGTERM, cleanup_and_exit)
+    signal.signal(signal.SIGINT, cleanup_and_exit)
+
+    # --- Open Port ---
+    if portHandler.openPort():
+        print(f"[Service Mode] Succeeded to open the port: {DEVICENAME}")
+    else:
+        print(f"[Service Mode] Failed to open the port: {DEVICENAME}")
+        print("Check DEVICENAME in config.yaml and ensure U2D2 is connected.")
+        return
+
+    # --- Set Port Baudrate ---
+    if portHandler.setBaudRate(BAUDRATE):
+        print(f"[Service Mode] Succeeded to change the baudrate to {BAUDRATE}")
+    else:
+        print(f"[Service Mode] Failed to change the baudrate to {BAUDRATE}")
+        portHandler.closePort()
+        return
+
+    # --- Initial Servo Setup ---
+    if not SERVO_IDS:
+        print("[Service Mode] Warning: No SERVO_IDS defined in config.yaml. Nothing to control.")
+    else:
+        print(f"\n[Service Mode] Initializing {len(SERVO_IDS)} servos to ~{DEFAULT_START_RPM} RPM...")
+        initial_dxl_vel_unit = rpm_to_dxl_velocity(DEFAULT_START_RPM)
+        for sid in SERVO_IDS:
+            print(f"\n--- Initializing Servo ID: {sid} ---")
+            if not set_operating_mode_dxl(sid, MODE_VELOCITY_CONTROL):
+                print(f"Servo {sid}: CRITICAL - Failed to set velocity control mode. Skipping for this servo.")
+                continue
+            if not set_torque_status(sid, True):
+                print(f"Servo {sid}: CRITICAL - Failed to enable torque. Skipping for this servo.")
+                continue
+            time.sleep(0.05)
+            current_target_dxl_vel = initial_dxl_vel_unit
+            if sid == 2:
+                current_target_dxl_vel = -initial_dxl_vel_unit
+            rpm_val_for_log = dxl_velocity_to_rpm(current_target_dxl_vel)
+            print(f"Servo {sid}: Setting initial speed to {rpm_val_for_log} RPM (DXL Unit: {current_target_dxl_vel}).")
+            if not set_goal_velocity_dxl(sid, current_target_dxl_vel):
+                print(f"Servo {sid}: Failed to set initial velocity.")
+            else:
+                print(f"Servo {sid}: Initial velocity set successfully.")
+    print("\n[Service Mode] Servo Initialization Complete. Running as a background service. Waiting for SIGTERM/SIGINT...")
+    try:
+        while True:
+            time.sleep(1)
+    except Exception as e:
+        print(f"[Service Mode] Exception: {e}")
+        cleanup_and_exit()
+
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Dynamixel CLI and Service")
+    parser.add_argument("--service", action="store_true", help="Run in headless service mode (for systemd)")
+    args = parser.parse_args()
+
     if DEVICENAME.startswith("/dev/ttyACM") or DEVICENAME.lower().startswith("com"):
-         print(f"Reminder: DEVICENAME is '{DEVICENAME}'. On Raspberry Pi, it's often '/dev/ttyUSB0' or similar.")
-         print("Please ensure this is correct in your 'config.yaml'.")
-    main_cli()
+        print(f"Reminder: DEVICENAME is '{DEVICENAME}'. On Raspberry Pi, it's often '/dev/ttyUSB0' or similar.")
+        print("Please ensure this is correct in your 'config.yaml'.")
+
+    if args.service:
+        run_service_mode()
+    else:
+        main_cli()
